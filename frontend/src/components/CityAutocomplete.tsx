@@ -57,7 +57,16 @@ export default function CityAutocomplete({ value, onChange, placeholder = "e.g.,
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
     setInputValue(newValue);
-    onChange(newValue, ''); // Clear state when user types
+    
+    // Auto-select state if there's an exact match
+    if (newValue.length >= 2) {
+      const results = searchCities(newValue, 1);
+      if (results.length > 0 && results[0].city.toLowerCase() === newValue.toLowerCase()) {
+        onChange(newValue, results[0].state);
+        return;
+      }
+    }
+    onChange(newValue, ''); // No exact match, let user select state manually
   };
 
   const handleSelectCity = useCallback((city: USCity) => {
@@ -100,6 +109,26 @@ export default function CityAutocomplete({ value, onChange, placeholder = "e.g.,
     }
   };
 
+  // Auto-select first suggestion when leaving the field
+  const handleBlur = () => {
+    // Small delay to allow click on suggestion to register
+    setTimeout(() => {
+      if (inputValue.length >= 2 && suggestions.length > 0) {
+        // Auto-select if there's a close match
+        const exactMatch = suggestions.find(s => s.city.toLowerCase() === inputValue.toLowerCase());
+        if (exactMatch) {
+          setInputValue(exactMatch.city);
+          onChange(exactMatch.city, exactMatch.state);
+        } else if (suggestions.length === 1) {
+          // If only one suggestion, auto-select it
+          setInputValue(suggestions[0].city);
+          onChange(suggestions[0].city, suggestions[0].state);
+        }
+      }
+      setShowSuggestions(false);
+    }, 200);
+  };
+
   return (
     <div className="relative">
       <input
@@ -109,6 +138,7 @@ export default function CityAutocomplete({ value, onChange, placeholder = "e.g.,
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
         onFocus={handleFocus}
+        onBlur={handleBlur}
         placeholder={placeholder}
         className={`input ${className}`}
         autoComplete="off"
