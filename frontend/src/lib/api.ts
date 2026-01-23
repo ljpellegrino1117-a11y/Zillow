@@ -48,6 +48,7 @@ export interface ZillowListing {
 export interface AirDNAData {
   id: number;
   city_id: number;
+  zip_code: string | null;
   bedrooms: number;
   average_annual_revenue: number;
   updated_at: string;
@@ -197,14 +198,26 @@ export const getAmenityCounts = async (city?: string, state?: string, bedrooms?:
 export const saveAirDNAData = async (
   city: string,
   state: string,
-  data: Array<{ bedrooms: number; average_annual_revenue: number }>
+  data: Array<{ bedrooms: number; average_annual_revenue: number }>,
+  zipCode?: string
 ): Promise<AirDNAData[]> => {
-  const response = await axios.post(`${API_BASE}/airdna`, { city, state, data });
+  const response = await axios.post(`${API_BASE}/airdna`, { 
+    city, 
+    state, 
+    zip_code: zipCode || null,
+    data 
+  });
   return response.data;
 };
 
-export const getAirDNAData = async (city: string, state: string): Promise<AirDNAData[]> => {
-  const response = await axios.get(`${API_BASE}/airdna/${encodeURIComponent(city)}/${encodeURIComponent(state)}`);
+export const getAirDNAData = async (city: string, state: string, zipCode?: string): Promise<AirDNAData[]> => {
+  const params = zipCode ? `?zip_code=${encodeURIComponent(zipCode)}` : '';
+  const response = await axios.get(`${API_BASE}/airdna/${encodeURIComponent(city)}/${encodeURIComponent(state)}${params}`);
+  return response.data;
+};
+
+export const getAirDNAZipCodes = async (city: string, state: string): Promise<(string | null)[]> => {
+  const response = await axios.get(`${API_BASE}/airdna/${encodeURIComponent(city)}/${encodeURIComponent(state)}/zip-codes`);
   return response.data;
 };
 

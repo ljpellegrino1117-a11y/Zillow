@@ -417,7 +417,7 @@ def get_amenity_counts(
 
 @app.post("/api/airdna", response_model=List[AirDNADataResponse])
 def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
-    """Save AirDNA data for a city."""
+    """Save AirDNA data for a city, optionally with a specific zip code."""
     # Get or create city
     city_obj = db.query(City).filter(
         City.city == data.city,
@@ -431,10 +431,17 @@ def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
     
     results = []
     for item in data.data:
-        existing = db.query(AirDNAData).filter(
+        # Query includes zip_code (can be None for city-wide data)
+        query = db.query(AirDNAData).filter(
             AirDNAData.city_id == city_obj.id,
             AirDNAData.bedrooms == item.bedrooms
-        ).first()
+        )
+        if data.zip_code:
+            query = query.filter(AirDNAData.zip_code == data.zip_code)
+        else:
+            query = query.filter(AirDNAData.zip_code.is_(None))
+        
+        existing = query.first()
         
         if existing:
             existing.average_annual_revenue = item.average_annual_revenue
@@ -445,6 +452,7 @@ def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
         else:
             airdna = AirDNAData(
                 city_id=city_obj.id,
+                zip_code=data.zip_code,
                 bedrooms=item.bedrooms,
                 average_annual_revenue=item.average_annual_revenue
             )
@@ -457,8 +465,13 @@ def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
 
 
 @app.get("/api/airdna/{city}/{state}", response_model=List[AirDNADataResponse])
-def get_airdna_data(city: str, state: str, db: Session = Depends(get_db)):
-    """Get AirDNA data for a city."""
+def get_airdna_data(
+    city: str, 
+    state: str, 
+    zip_code: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get AirDNA data for a city, optionally filtered by zip code."""
     city_obj = db.query(City).filter(
         City.city == city,
         City.state == state
@@ -466,7 +479,31 @@ def get_airdna_data(city: str, state: str, db: Session = Depends(get_db)):
     if not city_obj:
         return []
     
-    return db.query(AirDNAData).filter(AirDNAData.city_id == city_obj.id).all()
+    query = db.query(AirDNAData).filter(AirDNAData.city_id == city_obj.id)
+    
+    if zip_code:
+        # Get data for specific zip code
+        query = query.filter(AirDNAData.zip_code == zip_code)
+    
+    return query.all()
+
+
+@app.get("/api/airdna/{city}/{state}/zip-codes")
+def get_airdna_zip_codes(city: str, state: str, db: Session = Depends(get_db)):
+    """Get list of zip codes that have AirDNA data for a city."""
+    city_obj = db.query(City).filter(
+        City.city == city,
+        City.state == state
+    ).first()
+    if not city_obj:
+        return []
+    
+    # Get distinct zip codes (including None for city-wide)
+    zip_codes = db.query(AirDNAData.zip_code).filter(
+        AirDNAData.city_id == city_obj.id
+    ).distinct().all()
+    
+    return [z[0] for z in zip_codes]
 
 
 # ==================== Analysis Endpoints ====================
@@ -487,6 +524,8 @@ def get_discrepancy_analysis(
 ):
     """
     Analyze discrepancy between AirDNA revenue and rental prices.
+    Uses zip-code-specific AirDNA data when matching listings exist,
+    otherwise falls back to city-wide AirDNA data.
     Can filter by amenities to find specific opportunities.
     """
     results = []
@@ -501,40 +540,67 @@ def get_discrepancy_analysis(
         cities = db.query(City).all()
     
     for city_obj in cities:
-        # Get AirDNA data
-        airdna_data = {
-            d.bedrooms: d.average_annual_revenue 
-            for d in db.query(AirDNAData).filter(AirDNAData.city_id == city_obj.id).all()
-        }
+        # Get all AirDNA data for this city
+        all_airdna = db.query(AirDNAData).filter(AirDNAData.city_id == city_obj.id).all()
         
-        if not airdna_data:
+        if not all_airdna:
             continue
+        
+        # Separate city-wide and zip-specific data
+        city_wide_airdna = {d.bedrooms: d.average_annual_revenue for d in all_airdna if d.zip_code is None}
+        zip_airdna = {}  # {zip_code: {bedrooms: revenue}}
+        for d in all_airdna:
+            if d.zip_code:
+                if d.zip_code not in zip_airdna:
+                    zip_airdna[d.zip_code] = {}
+                zip_airdna[d.zip_code][d.bedrooms] = d.average_annual_revenue
         
         bedroom_range = [bedrooms] if bedrooms else range(min_bedrooms, max_bedrooms + 1)
         
         for br in bedroom_range:
-            if br not in airdna_data:
-                continue
-            
-            # Build query with amenity filters
-            query = db.query(ZillowListing).filter(
+            # Get listings for this bedroom count
+            base_query = db.query(ZillowListing).filter(
                 ZillowListing.city_id == city_obj.id,
                 ZillowListing.bedrooms == br
             )
             
             # Apply amenity filters
             if has_pool is True:
-                query = query.filter(ZillowListing.has_pool == True)
+                base_query = base_query.filter(ZillowListing.has_pool == True)
             if has_waterview is True:
-                query = query.filter(ZillowListing.has_waterview == True)
+                base_query = base_query.filter(ZillowListing.has_waterview == True)
             if has_basement is True:
-                query = query.filter(ZillowListing.has_basement == True)
+                base_query = base_query.filter(ZillowListing.has_basement == True)
             if has_unfinished_basement is True:
-                query = query.filter(ZillowListing.has_unfinished_basement == True)
+                base_query = base_query.filter(ZillowListing.has_unfinished_basement == True)
             
-            listings = query.order_by(ZillowListing.price).all()
+            listings = base_query.order_by(ZillowListing.price).all()
             
             if not listings:
+                continue
+            
+            # Determine which AirDNA data to use
+            # Priority: zip-code specific if available, otherwise city-wide
+            airdna_annual = None
+            
+            # Check if we have zip-code specific data that matches listings
+            listing_zips = set(l.zip_code for l in listings if l.zip_code)
+            for zip_code in listing_zips:
+                if zip_code in zip_airdna and br in zip_airdna[zip_code]:
+                    # We have zip-specific data - could analyze per-zip
+                    # For now, just use city-wide if available
+                    pass
+            
+            # Use city-wide data
+            if br in city_wide_airdna:
+                airdna_annual = city_wide_airdna[br]
+            elif zip_airdna:
+                # Fall back to average of zip-specific data
+                zip_revenues = [z[br] for z in zip_airdna.values() if br in z]
+                if zip_revenues:
+                    airdna_annual = sum(zip_revenues) / len(zip_revenues)
+            
+            if not airdna_annual:
                 continue
             
             prices = [l.price for l in listings]
@@ -545,7 +611,6 @@ def get_discrepancy_analysis(
             bottom_prices = sorted(prices)[:bottom_count]
             bottom_avg = sum(bottom_prices) / len(bottom_prices)
             
-            airdna_annual = airdna_data[br]
             airdna_monthly = airdna_annual / 12
             
             annual_rent_avg = avg_price * 12

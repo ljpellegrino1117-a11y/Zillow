@@ -70,12 +70,13 @@ class AirDNAData(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     city_id = Column(Integer, ForeignKey("cities.id"), nullable=False)
+    zip_code = Column(String(10), nullable=True, index=True)  # Optional zip code for granular data
     bedrooms = Column(Integer, nullable=False)
     average_annual_revenue = Column(Float, nullable=False)  # Annual revenue from AirDNA
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
-        UniqueConstraint('city_id', 'bedrooms', name='unique_city_bedroom'),
+        UniqueConstraint('city_id', 'zip_code', 'bedrooms', name='unique_city_zip_bedroom'),
     )
 
     city_rel = relationship("City", back_populates="airdna_data")

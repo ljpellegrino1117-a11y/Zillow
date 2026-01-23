@@ -94,6 +94,7 @@ class AirDNADataBase(BaseModel):
 class AirDNADataResponse(AirDNADataBase):
     id: int
     city_id: int
+    zip_code: Optional[str] = None
     updated_at: datetime
 
     class Config:
@@ -101,9 +102,10 @@ class AirDNADataResponse(AirDNADataBase):
 
 
 class AirDNAInput(BaseModel):
-    """Input schema for adding AirDNA data for a city"""
+    """Input schema for adding AirDNA data for a city (optionally with zip code)"""
     city: str
     state: str
+    zip_code: Optional[str] = None  # Optional zip code for granular data
     data: List[AirDNADataBase]
 
 
