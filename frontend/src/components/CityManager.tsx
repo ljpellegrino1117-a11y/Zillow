@@ -12,6 +12,7 @@ import {
   ScrapeStatus 
 } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
+import CityAutocomplete from './CityAutocomplete';
 
 interface Props {
   onCityChange?: () => void;
@@ -270,12 +271,13 @@ export default function CityManager({ onCityChange }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <label className="input-label">City*</label>
-            <input
-              type="text"
+            <CityAutocomplete
               value={newCity}
-              onChange={(e) => setNewCity(e.target.value)}
-              placeholder="e.g., Chicago"
-              className="input"
+              onChange={(city, state) => {
+                setNewCity(city);
+                if (state) setNewState(state);
+              }}
+              placeholder="Start typing city name..."
             />
           </div>
           <div>
