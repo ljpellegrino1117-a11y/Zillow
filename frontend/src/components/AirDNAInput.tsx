@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Save, DollarSign, Loader2, Trash2, Plus, Check, X, Minus } from 'lucide-react';
-import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, City, AirDNAData, AirDNAAmenities } from '@/lib/api';
+import { useState, useEffect, useRef } from 'react';
+import { Save, DollarSign, Loader2, Trash2, Plus, Check, X, Minus, Upload, Camera, MessageSquare, Send, Image as ImageIcon } from 'lucide-react';
+import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, analyzeScreenshot, continueAIConversation, City, AirDNAData, AirDNAAmenities } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 
 interface Props {
@@ -45,6 +45,17 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
   // Tri-state amenities: true = WITH, false = WITHOUT, undefined = ANY (not set)
   const [selectedAmenities, setSelectedAmenities] = useState<Record<string, AmenityState>>({});
   const [showAmenities, setShowAmenities] = useState(false);
+  
+  // AI Screenshot Analysis
+  const [showAIAnalysis, setShowAIAnalysis] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [aiContext, setAiContext] = useState('');
+  const [aiConversationId, setAiConversationId] = useState<string | null>(null);
+  const [aiMessages, setAiMessages] = useState<{role: 'user' | 'assistant', content: string}[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiFollowUp, setAiFollowUp] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch cities on mount and when refreshTrigger changes
   useEffect(() => {
@@ -192,6 +203,77 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
     }
   };
 
+  // AI Screenshot handlers
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedImage(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+      // Reset conversation when new image is selected
+      setAiConversationId(null);
+      setAiMessages([]);
+    }
+  };
+
+  const handleAnalyzeScreenshot = async () => {
+    if (!selectedImage) return;
+    
+    setAiLoading(true);
+    try {
+      const response = await analyzeScreenshot(selectedImage, aiContext, aiConversationId || undefined);
+      setAiConversationId(response.conversation_id);
+      
+      // Add messages to chat
+      if (aiContext) {
+        setAiMessages(prev => [...prev, { role: 'user', content: aiContext }]);
+      } else {
+        setAiMessages(prev => [...prev, { role: 'user', content: '[Uploaded screenshot for analysis]' }]);
+      }
+      setAiMessages(prev => [...prev, { role: 'assistant', content: response.message }]);
+      setAiContext('');
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.detail || 'Failed to analyze screenshot';
+      setAiMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errorMsg}` }]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleSendFollowUp = async () => {
+    if (!aiFollowUp.trim() || !aiConversationId) return;
+    
+    const message = aiFollowUp.trim();
+    setAiFollowUp('');
+    setAiMessages(prev => [...prev, { role: 'user', content: message }]);
+    setAiLoading(true);
+    
+    try {
+      const response = await continueAIConversation(aiConversationId, message);
+      setAiMessages(prev => [...prev, { role: 'assistant', content: response.message }]);
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.detail || 'Failed to continue conversation';
+      setAiMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errorMsg}` }]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const resetAIAnalysis = () => {
+    setSelectedImage(null);
+    setImagePreview(null);
+    setAiContext('');
+    setAiConversationId(null);
+    setAiMessages([]);
+    setAiFollowUp('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const getAmenityBadges = (data: AirDNAData) => {
     const badges: { label: string; icon: string; state: 'with' | 'without' }[] = [];
     
@@ -240,6 +322,157 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
       <p className="text-sm text-gray-600 mb-4">
         Add revenue data from AirDNA. Specify bedroom range and optionally filter by amenities for more accurate comparisons.
       </p>
+
+      {/* AI Screenshot Analysis Toggle */}
+      <div className="mb-4">
+        <button
+          onClick={() => setShowAIAnalysis(!showAIAnalysis)}
+          className={`btn w-full justify-center ${showAIAnalysis ? 'btn-primary' : 'btn-secondary'}`}
+        >
+          <Camera className="h-4 w-4" />
+          {showAIAnalysis ? 'Hide AI Screenshot Analysis' : 'Analyze AirDNA Screenshot with AI'}
+        </button>
+      </div>
+
+      {/* AI Screenshot Analysis Panel */}
+      {showAIAnalysis && (
+        <div className="mb-6 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-4 border border-purple-200">
+          <h3 className="text-sm font-semibold text-purple-800 mb-3 flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" />
+            AI Screenshot Analysis
+          </h3>
+          
+          <p className="text-xs text-purple-600 mb-3">
+            Upload an AirDNA screenshot and AI will extract revenue data. You can ask follow-up questions for clarification.
+          </p>
+
+          {/* Image Upload Area */}
+          <div className="mb-4">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleImageSelect}
+              className="hidden"
+              id="screenshot-upload"
+            />
+            
+            {!imagePreview ? (
+              <label
+                htmlFor="screenshot-upload"
+                className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-purple-300 rounded-lg cursor-pointer bg-white hover:bg-purple-50 transition-colors"
+              >
+                <Upload className="h-8 w-8 text-purple-400 mb-2" />
+                <span className="text-sm text-purple-600">Click to upload screenshot</span>
+                <span className="text-xs text-purple-400">PNG, JPG, or WebP</span>
+              </label>
+            ) : (
+              <div className="relative">
+                <img
+                  src={imagePreview}
+                  alt="Screenshot preview"
+                  className="w-full max-h-48 object-contain rounded-lg border border-purple-200"
+                />
+                <button
+                  onClick={resetAIAnalysis}
+                  className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600"
+                  title="Remove image"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Context Input (before first analysis) */}
+          {imagePreview && aiMessages.length === 0 && (
+            <div className="mb-4">
+              <label className="input-label">Add context (optional)</label>
+              <textarea
+                value={aiContext}
+                onChange={(e) => setAiContext(e.target.value)}
+                placeholder="e.g., This is for 4-bedroom properties in Austin, TX with a pool..."
+                className="input min-h-[60px] text-sm"
+                rows={2}
+              />
+              <button
+                onClick={handleAnalyzeScreenshot}
+                disabled={aiLoading}
+                className="btn-primary mt-2 w-full justify-center"
+              >
+                {aiLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon className="h-4 w-4" />
+                    Analyze Screenshot
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Chat Messages */}
+          {aiMessages.length > 0 && (
+            <div className="mb-4 max-h-64 overflow-y-auto space-y-3 bg-white rounded-lg p-3 border border-purple-100">
+              {aiMessages.map((msg, i) => (
+                <div
+                  key={i}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
+                      msg.role === 'user'
+                        ? 'bg-primary-600 text-white'
+                        : 'bg-gray-100 text-gray-800'
+                    }`}
+                  >
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  </div>
+                </div>
+              ))}
+              {aiLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Thinking...
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Follow-up Input */}
+          {aiMessages.length > 0 && (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={aiFollowUp}
+                onChange={(e) => setAiFollowUp(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendFollowUp()}
+                placeholder="Ask a follow-up question..."
+                className="input flex-1 text-sm"
+                disabled={aiLoading}
+              />
+              <button
+                onClick={handleSendFollowUp}
+                disabled={aiLoading || !aiFollowUp.trim()}
+                className="btn-primary px-3"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Note about API key */}
+          <p className="text-xs text-purple-500 mt-3">
+            Requires OPENAI_API_KEY environment variable on the backend.
+          </p>
+        </div>
+      )}
 
       {/* City selector */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Query, Response
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Query, Response, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
@@ -9,6 +9,8 @@ from functools import lru_cache
 import asyncio
 import logging
 import time
+import base64
+import os
 
 from .database import engine, get_db, Base
 from .models import City, ZillowListing, AirDNAData
@@ -1168,6 +1170,181 @@ def get_discrepancy_analysis(
     # Cache the result
     analysis_cache.set(cache_key, results)
     return results
+
+
+# ==================== AI Screenshot Analysis ====================
+
+# Store conversation history for follow-up questions (in-memory, per-session)
+ai_conversations: Dict[str, List[Dict[str, Any]]] = {}
+
+@app.post("/api/ai/analyze-screenshot")
+async def analyze_airdna_screenshot(
+    image: UploadFile = File(...),
+    context: str = Form(""),
+    conversation_id: Optional[str] = Form(None),
+):
+    """
+    Analyze an AirDNA screenshot using AI vision.
+    Extracts revenue data and can ask clarifying questions.
+    Requires OPENAI_API_KEY environment variable.
+    """
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        raise HTTPException(
+            status_code=400, 
+            detail="OPENAI_API_KEY not configured. Add it to environment variables."
+        )
+    
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=openai_key)
+    except ImportError:
+        raise HTTPException(status_code=500, detail="OpenAI package not installed")
+    
+    # Read and encode image
+    image_content = await image.read()
+    base64_image = base64.b64encode(image_content).decode('utf-8')
+    
+    # Determine image type
+    content_type = image.content_type or "image/png"
+    if "jpeg" in content_type or "jpg" in content_type:
+        media_type = "image/jpeg"
+    elif "png" in content_type:
+        media_type = "image/png"
+    elif "webp" in content_type:
+        media_type = "image/webp"
+    else:
+        media_type = "image/png"
+    
+    # Initialize or retrieve conversation
+    if conversation_id and conversation_id in ai_conversations:
+        messages = ai_conversations[conversation_id]
+    else:
+        conversation_id = f"conv_{int(time.time() * 1000)}"
+        messages = [{
+            "role": "system",
+            "content": """You are an expert at analyzing AirDNA (short-term rental data) screenshots. 
+Your job is to:
+1. Extract key revenue data from the screenshot (annual revenue, monthly revenue, occupancy rates, ADR, etc.)
+2. Identify the location, bedroom count, and any other relevant details
+3. Ask clarifying questions if the image is unclear or if you need more context
+4. Provide the data in a structured way that can be used for rental arbitrage analysis
+
+When you identify revenue data, always specify:
+- Whether it's monthly or annual
+- The bedroom count(s) it applies to
+- Any amenities or property features mentioned
+- The location/market
+
+If you're confident about the data, provide a summary like:
+"I found: [X] bedrooms, $[Y] annual revenue ($[Z]/month), [Location]"
+
+If you need clarification, ask specific questions."""
+        }]
+        ai_conversations[conversation_id] = messages
+    
+    # Build the user message with image and context
+    user_content = [
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{media_type};base64,{base64_image}"
+            }
+        }
+    ]
+    
+    if context:
+        user_content.insert(0, {
+            "type": "text",
+            "text": f"User context: {context}\n\nPlease analyze this AirDNA screenshot."
+        })
+    else:
+        user_content.insert(0, {
+            "type": "text", 
+            "text": "Please analyze this AirDNA screenshot and extract the revenue data."
+        })
+    
+    messages.append({"role": "user", "content": user_content})
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",  # Using GPT-4 Vision
+            messages=messages,
+            max_tokens=1000
+        )
+        
+        assistant_message = response.choices[0].message.content
+        messages.append({"role": "assistant", "content": assistant_message})
+        
+        # Keep conversation history (limit to last 10 messages to save memory)
+        if len(messages) > 12:
+            messages = [messages[0]] + messages[-10:]
+        ai_conversations[conversation_id] = messages
+        
+        # Try to extract structured data from the response
+        extracted_data = None
+        if "$" in assistant_message and any(word in assistant_message.lower() for word in ["annual", "monthly", "revenue", "bedroom"]):
+            extracted_data = {
+                "raw_response": assistant_message,
+                "needs_clarification": "?" in assistant_message or "unclear" in assistant_message.lower()
+            }
+        
+        return {
+            "conversation_id": conversation_id,
+            "message": assistant_message,
+            "extracted_data": extracted_data
+        }
+        
+    except Exception as e:
+        logger.error(f"OpenAI API error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
+
+
+@app.post("/api/ai/continue-conversation")
+async def continue_ai_conversation(
+    conversation_id: str = Form(...),
+    message: str = Form(...),
+):
+    """Continue a conversation with the AI about a previously uploaded screenshot."""
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
+    
+    if conversation_id not in ai_conversations:
+        raise HTTPException(status_code=404, detail="Conversation not found. Please upload a new screenshot.")
+    
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=openai_key)
+    except ImportError:
+        raise HTTPException(status_code=500, detail="OpenAI package not installed")
+    
+    messages = ai_conversations[conversation_id]
+    messages.append({"role": "user", "content": message})
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            max_tokens=1000
+        )
+        
+        assistant_message = response.choices[0].message.content
+        messages.append({"role": "assistant", "content": assistant_message})
+        
+        # Limit conversation history
+        if len(messages) > 12:
+            messages = [messages[0]] + messages[-10:]
+        ai_conversations[conversation_id] = messages
+        
+        return {
+            "conversation_id": conversation_id,
+            "message": assistant_message
+        }
+        
+    except Exception as e:
+        logger.error(f"OpenAI API error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
 
 
 @app.get("/api/health")

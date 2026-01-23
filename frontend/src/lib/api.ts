@@ -456,3 +456,45 @@ export const getDiscrepancyAnalysis = async (
   setCache(cacheKey, response.data, ANALYSIS_CACHE_TTL);
   return response.data;
 };
+
+// AI Screenshot Analysis
+export interface AIAnalysisResponse {
+  conversation_id: string;
+  message: string;
+  extracted_data?: {
+    raw_response: string;
+    needs_clarification: boolean;
+  };
+}
+
+export const analyzeScreenshot = async (
+  image: File,
+  context: string = '',
+  conversationId?: string
+): Promise<AIAnalysisResponse> => {
+  const formData = new FormData();
+  formData.append('image', image);
+  formData.append('context', context);
+  if (conversationId) {
+    formData.append('conversation_id', conversationId);
+  }
+  
+  const response = await axios.post(`${API_BASE}/ai/analyze-screenshot`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return response.data;
+};
+
+export const continueAIConversation = async (
+  conversationId: string,
+  message: string
+): Promise<AIAnalysisResponse> => {
+  const formData = new FormData();
+  formData.append('conversation_id', conversationId);
+  formData.append('message', message);
+  
+  const response = await axios.post(`${API_BASE}/ai/continue-conversation`, formData);
+  return response.data;
+};
