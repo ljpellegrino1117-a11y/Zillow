@@ -83,10 +83,7 @@ export interface AirDNAAmenities {
   has_garage?: boolean;
   has_yard?: boolean;
   has_pet_friendly?: boolean;
-  has_office?: boolean;
-  has_den?: boolean;
-  has_loft?: boolean;
-  has_mother_in_law?: boolean;
+  has_mother_in_law?: boolean;  // In-law suite (property feature, not bedroom)
 }
 
 export interface AirDNAData {
@@ -104,9 +101,6 @@ export interface AirDNAData {
   has_garage: boolean;
   has_yard: boolean;
   has_pet_friendly: boolean;
-  has_office: boolean;
-  has_den: boolean;
-  has_loft: boolean;
   has_mother_in_law: boolean;
   updated_at: string;
 }

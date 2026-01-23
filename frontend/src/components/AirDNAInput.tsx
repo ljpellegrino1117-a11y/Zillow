@@ -11,6 +11,8 @@ interface Props {
 
 const BEDROOM_OPTIONS = [3, 4, 5, 6, 7, 8];
 
+// Property amenities for AirDNA revenue matching
+// NOTE: Extra rooms (office, den, loft) are NOT here - they determine potential bedrooms on listings
 const AMENITY_OPTIONS = [
   { key: 'has_pool', label: 'Pool', icon: '🏊' },
   { key: 'has_waterfront', label: 'Waterfront', icon: '🏖️' },
@@ -19,9 +21,6 @@ const AMENITY_OPTIONS = [
   { key: 'has_garage', label: 'Garage', icon: '🚗' },
   { key: 'has_yard', label: 'Yard', icon: '🌳' },
   { key: 'has_pet_friendly', label: 'Pet Friendly', icon: '🐕' },
-  { key: 'has_office', label: 'Office', icon: '💼' },
-  { key: 'has_den', label: 'Den/Study', icon: '📚' },
-  { key: 'has_loft', label: 'Loft', icon: '🏠' },
   { key: 'has_mother_in_law', label: 'In-Law Suite', icon: '🏘️' },
 ];
 
@@ -160,9 +159,6 @@ export default function AirDNAInput({ onDataSaved }: Props) {
     if (data.has_garage) badges.push({ label: 'Garage', icon: '🚗' });
     if (data.has_yard) badges.push({ label: 'Yard', icon: '🌳' });
     if (data.has_pet_friendly) badges.push({ label: 'Pet Friendly', icon: '🐕' });
-    if (data.has_office) badges.push({ label: 'Office', icon: '💼' });
-    if (data.has_den) badges.push({ label: 'Den', icon: '📚' });
-    if (data.has_loft) badges.push({ label: 'Loft', icon: '🏠' });
     if (data.has_mother_in_law) badges.push({ label: 'In-Law', icon: '🏘️' });
     return badges;
   };

@@ -388,8 +388,8 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                 <tr>
                   <th>Type</th>
                   <th>Address</th>
-                  <th>BR</th>
-                  <th>Potential BR</th>
+                  <th>Listed BR</th>
+                  <th>Potential BR Range</th>
                   <th>BA</th>
                   <th>Price</th>
                   <th>Extra Rooms</th>
@@ -437,13 +437,20 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                       </td>
                       <td className="font-medium">{listing.bedrooms}</td>
                       <td>
-                        {listing.potential_bedrooms && listing.potential_bedrooms > listing.bedrooms ? (
-                          <span className="font-semibold text-blue-600" title={`+${listing.extra_rooms_count} extra rooms`}>
-                            {listing.potential_bedrooms}
-                            <span className="text-xs text-blue-400 ml-1">+{listing.extra_rooms_count}</span>
-                          </span>
+                        {listing.extra_rooms_count && listing.extra_rooms_count > 0 ? (
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-blue-600">
+                              {Array.from(
+                                { length: listing.extra_rooms_count + 1 }, 
+                                (_, i) => listing.bedrooms + i
+                              ).join(', ')}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              +{listing.extra_rooms_count} convertible
+                            </span>
+                          </div>
                         ) : (
-                          <span className="text-gray-400">{listing.bedrooms}</span>
+                          <span className="text-gray-400">{listing.bedrooms} only</span>
                         )}
                       </td>
                       <td>{listing.bathrooms || '—'}</td>

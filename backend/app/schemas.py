@@ -118,7 +118,7 @@ class ZillowListingResponse(ZillowListingBase):
 
 # AirDNA Schemas
 class AirDNAAmenities(BaseModel):
-    """Amenity filters for AirDNA data"""
+    """Amenity filters for AirDNA data (property features, NOT extra rooms)"""
     has_pool: bool = False
     has_waterfront: bool = False
     has_waterview: bool = False
@@ -126,10 +126,7 @@ class AirDNAAmenities(BaseModel):
     has_garage: bool = False
     has_yard: bool = False
     has_pet_friendly: bool = False
-    has_office: bool = False
-    has_den: bool = False
-    has_loft: bool = False
-    has_mother_in_law: bool = False
+    has_mother_in_law: bool = False  # In-law suite (counts as feature, not bedroom)
 
 
 class AirDNADataBase(BaseModel):
@@ -154,9 +151,6 @@ class AirDNADataResponse(BaseModel):
     has_garage: bool = False
     has_yard: bool = False
     has_pet_friendly: bool = False
-    has_office: bool = False
-    has_den: bool = False
-    has_loft: bool = False
     has_mother_in_law: bool = False
     updated_at: datetime
 

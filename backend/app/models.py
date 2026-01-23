@@ -112,6 +112,7 @@ class AirDNAData(Base):
     average_annual_revenue = Column(Float, nullable=False)  # Annual revenue from AirDNA
     
     # Amenity filters - when set, this revenue applies to listings with these amenities
+    # NOTE: Extra rooms (office, den, loft) are NOT amenity filters - they determine potential bedrooms
     amenity_filter = Column(Text, nullable=True)  # JSON string of required amenities
     has_pool = Column(Boolean, default=False)
     has_waterfront = Column(Boolean, default=False)
@@ -120,11 +121,7 @@ class AirDNAData(Base):
     has_garage = Column(Boolean, default=False)
     has_yard = Column(Boolean, default=False)
     has_pet_friendly = Column(Boolean, default=False)
-    # Extra rooms
-    has_office = Column(Boolean, default=False)
-    has_den = Column(Boolean, default=False)
-    has_loft = Column(Boolean, default=False)
-    has_mother_in_law = Column(Boolean, default=False)
+    has_mother_in_law = Column(Boolean, default=False)  # In-law suite (property feature)
     
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
