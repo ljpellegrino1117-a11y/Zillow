@@ -1,18 +1,41 @@
 'use client';
 
 import { useState } from 'react';
-import { BarChart3, Home } from 'lucide-react';
+import { BarChart3, Home, Trash2 } from 'lucide-react';
 import CityManager from '@/components/CityManager';
 import AirDNAInput from '@/components/AirDNAInput';
 import DiscrepancyTable from '@/components/DiscrepancyTable';
 import ListingsTable from '@/components/ListingsTable';
+import { getCities, deleteCity, getAirDNAData, deleteAirDNAData } from '@/lib/api';
 
 export default function Dashboard() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [activeTab, setActiveTab] = useState<'analysis' | 'listings'>('analysis');
+  const [clearing, setClearing] = useState(false);
 
   const handleDataChange = () => {
     setRefreshTrigger(prev => prev + 1);
+  };
+
+  const handleClearAll = async () => {
+    if (!confirm('Are you sure you want to clear ALL data? This will delete all cities, listings, and AirDNA data.')) {
+      return;
+    }
+    
+    setClearing(true);
+    try {
+      // Get all cities and delete them (this cascades to listings)
+      const cities = await getCities();
+      for (const city of cities) {
+        await deleteCity(city.city, city.state, city.zip_code || undefined);
+      }
+      handleDataChange();
+    } catch (error) {
+      console.error('Failed to clear all data:', error);
+      alert('Failed to clear all data');
+    } finally {
+      setClearing(false);
+    }
   };
 
   return (
@@ -30,7 +53,15 @@ export default function Dashboard() {
                 <p className="text-xs text-gray-500">Find rental arbitrage opportunities</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleClearAll}
+                disabled={clearing}
+                className="btn text-xs py-1.5 px-3 text-red-600 hover:bg-red-50 border border-red-200"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {clearing ? 'Clearing...' : 'Clear All Data'}
+              </button>
               <a
                 href="http://localhost:8000/docs"
                 target="_blank"

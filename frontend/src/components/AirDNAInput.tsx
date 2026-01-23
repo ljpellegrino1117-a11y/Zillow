@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Save, DollarSign, Loader2, Check, Trash2, Plus, X } from 'lucide-react';
+import { Save, DollarSign, Loader2, Trash2, Plus } from 'lucide-react';
 import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, City, AirDNAData, AirDNAAmenities } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 
@@ -150,6 +150,20 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
     }
   };
 
+  const handleClearAll = async () => {
+    if (!confirm('Delete all AirDNA entries for this city?')) return;
+    
+    try {
+      for (const entry of existingData) {
+        await deleteAirDNAData(entry.id);
+      }
+      setExistingData([]);
+      onDataSaved?.();
+    } catch (error) {
+      console.error('Failed to clear AirDNA data:', error);
+    }
+  };
+
   const getAmenityBadges = (data: AirDNAData) => {
     const badges = [];
     if (data.has_pool) badges.push({ label: 'Pool', icon: '🏊' });
@@ -166,10 +180,21 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
 
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-        <DollarSign className="h-5 w-5 text-green-600" />
-        AirDNA Revenue Data
-      </h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          <DollarSign className="h-5 w-5 text-green-600" />
+          AirDNA Revenue Data
+        </h2>
+        {existingData.length > 0 && (
+          <button
+            onClick={handleClearAll}
+            className="btn text-xs py-1 px-2 text-red-600 hover:bg-red-50"
+          >
+            <Trash2 className="h-3 w-3" />
+            Clear All
+          </button>
+        )}
+      </div>
 
       <p className="text-sm text-gray-600 mb-4">
         Add revenue data from AirDNA. Specify bedroom range and optionally filter by amenities for more accurate comparisons.

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, RefreshCw, MapPin, Clock, Loader2, Map, DollarSign, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, MapPin, Clock, Loader2, Map, DollarSign, AlertCircle, X } from 'lucide-react';
 import { 
   City, 
   getCities, 
@@ -136,6 +136,20 @@ export default function CityManager({ onCityChange }: Props) {
     }
   };
 
+  const handleClearAllCities = async () => {
+    if (!confirm('Delete all cities and their listings?')) return;
+    
+    try {
+      for (const city of cities) {
+        await deleteCity(city.city, city.state, city.zip_code || undefined);
+      }
+      await fetchCities();
+      onCityChange?.();
+    } catch (error) {
+      console.error('Failed to clear cities:', error);
+    }
+  };
+
   const handleStartScrape = async (c: City) => {
     const key = `${c.city}_${c.state}` + (c.zip_code ? `_${c.zip_code}` : '');
     try {
@@ -224,10 +238,21 @@ export default function CityManager({ onCityChange }: Props) {
 
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-        <MapPin className="h-5 w-5 text-primary-600" />
-        Rental Cities Search
-      </h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          <MapPin className="h-5 w-5 text-primary-600" />
+          Rental Cities Search
+        </h2>
+        {cities.length > 0 && (
+          <button
+            onClick={handleClearAllCities}
+            className="btn text-xs py-1 px-2 text-red-600 hover:bg-red-50"
+          >
+            <Trash2 className="h-3 w-3" />
+            Clear All
+          </button>
+        )}
+      </div>
 
       {/* Error message */}
       {error && (
