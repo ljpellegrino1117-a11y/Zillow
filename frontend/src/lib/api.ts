@@ -7,6 +7,7 @@ const cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
 const DEFAULT_CACHE_TTL = 30000; // 30 seconds for most data
 const STATIC_CACHE_TTL = 120000; // 2 minutes for static data like cities
 const ANALYSIS_CACHE_TTL = 90000; // 90 seconds for analysis data
+const AIRBTICS_STATUS_TTL = 5000; // 5 seconds for sync status (needs to be fresh when polling)
 
 function getCached<T>(key: string): T | null {
   const cached = cache.get(key);
@@ -415,16 +416,27 @@ export const saveAirDNAData = async (params: SaveAirDNAParams): Promise<AirDNADa
     average_annual_revenue: params.averageAnnualRevenue,
     amenities: params.amenities || null
   });
+  // Invalidate AirDNA cache for this city
+  invalidateCache(`airdna:${params.city}:${params.state}`);
+  invalidateCache('discrepancy');
   return response.data;
 };
 
 export const deleteAirDNAData = async (id: number): Promise<void> => {
   await axios.delete(`${API_BASE}/airdna/${id}`);
+  // Invalidate all AirDNA cache (we don't know which city this was)
+  invalidateCache('airdna:');
+  invalidateCache('discrepancy');
 };
 
 export const getAirDNAData = async (city: string, state: string, zipCode?: string): Promise<AirDNAData[]> => {
+  const cacheKey = `airdna:${city}:${state}:${zipCode || ''}`;
+  const cached = getCached<AirDNAData[]>(cacheKey);
+  if (cached) return cached;
+  
   const params = zipCode ? `?zip_code=${encodeURIComponent(zipCode)}` : '';
   const response = await axios.get(`${API_BASE}/airdna/${encodeURIComponent(city)}/${encodeURIComponent(state)}${params}`);
+  setCache(cacheKey, response.data, DEFAULT_CACHE_TTL);
   return response.data;
 };
 
@@ -594,11 +606,21 @@ export const syncAirbticsCity = async (
 };
 
 export const getAirbticsSyncStatus = async (): Promise<AirbticsSyncStatus> => {
+  const cacheKey = 'airbtics_status';
+  const cached = getCached<AirbticsSyncStatus>(cacheKey);
+  if (cached) return cached;
+  
   const response = await axios.get(`${API_BASE}/airbtics/status`);
+  setCache(cacheKey, response.data, AIRBTICS_STATUS_TTL);
   return response.data;
 };
 
 export const getAirbticsCityStatuses = async (): Promise<AirbticsCityStatus[]> => {
+  const cacheKey = 'airbtics_cities';
+  const cached = getCached<AirbticsCityStatus[]>(cacheKey);
+  if (cached) return cached;
+  
   const response = await axios.get(`${API_BASE}/airbtics/cities`);
+  setCache(cacheKey, response.data, AIRBTICS_STATUS_TTL);
   return response.data;
 };

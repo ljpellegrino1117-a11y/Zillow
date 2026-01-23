@@ -112,14 +112,19 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
 
   // Fetch Airbtics sync status on mount and poll while syncing
   useEffect(() => {
+    let mounted = true;
+    
     const fetchStatus = async () => {
+      if (!mounted) return;
       try {
-        const status = await getAirbticsSyncStatus();
-        setAirbticsSyncStatus(status);
-        
-        // Also fetch city statuses
-        const cityStatuses = await getAirbticsCityStatuses();
-        setAirbticsCityStatuses(cityStatuses);
+        const [status, cityStatuses] = await Promise.all([
+          getAirbticsSyncStatus(),
+          getAirbticsCityStatuses()
+        ]);
+        if (mounted) {
+          setAirbticsSyncStatus(status);
+          setAirbticsCityStatuses(cityStatuses);
+        }
       } catch (error) {
         console.error('Failed to fetch Airbtics status:', error);
       }
@@ -127,15 +132,18 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
     
     fetchStatus();
     
-    // Poll while syncing
+    // Poll while syncing - only if actively syncing
     const interval = setInterval(() => {
-      if (syncingAll || airbticsSyncStatus?.status === 'syncing') {
+      if ((syncingAll || airbticsSyncStatus?.status === 'syncing') && mounted) {
         fetchStatus();
       }
-    }, 2000);
+    }, 3000); // Increased to 3s for less load
     
-    return () => clearInterval(interval);
-  }, [syncingAll]);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [syncingAll, airbticsSyncStatus?.status]);
 
   // Airbtics sync handlers
   const handleSyncAllCities = async () => {

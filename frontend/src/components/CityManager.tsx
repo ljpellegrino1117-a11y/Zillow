@@ -73,7 +73,7 @@ export default function CityManager({ onCityChange }: Props) {
     fetchCities();
   }, [fetchCities]);
 
-  // Poll for scrape status
+  // Poll for scrape status - optimized for batch updates
   useEffect(() => {
     const runningCities = Object.entries(scrapeStatuses)
       .filter(([, status]) => status.status === 'running')
@@ -81,27 +81,59 @@ export default function CityManager({ onCityChange }: Props) {
 
     if (runningCities.length === 0) return;
 
-    const interval = setInterval(async () => {
-      for (const key of runningCities) {
+    let mounted = true;
+    
+    const pollStatus = async () => {
+      if (!mounted) return;
+      
+      // Batch all status requests in parallel
+      const statusPromises = runningCities.map(async (key) => {
         const parts = key.split('_');
         const city = parts[0];
         const state = parts[1];
         const zipCode = parts.length > 2 ? parts[2] : undefined;
         try {
           const status = await getScrapeStatus(city, state, zipCode);
-          setScrapeStatuses(prev => ({ ...prev, [key]: status }));
-          
-          if (status.status !== 'running') {
-            fetchCities();
-            onCityChange?.();
-          }
+          return { key, status };
         } catch (error) {
           console.error(`Failed to get status for ${key}:`, error);
+          return null;
+        }
+      });
+      
+      const results = await Promise.all(statusPromises);
+      
+      if (!mounted) return;
+      
+      // Batch state update
+      const updates: Record<string, ScrapeStatus> = {};
+      let anyCompleted = false;
+      
+      for (const result of results) {
+        if (result) {
+          updates[result.key] = result.status;
+          if (result.status.status !== 'running') {
+            anyCompleted = true;
+          }
         }
       }
-    }, 2000);
+      
+      if (Object.keys(updates).length > 0) {
+        setScrapeStatuses(prev => ({ ...prev, ...updates }));
+      }
+      
+      if (anyCompleted) {
+        fetchCities();
+        onCityChange?.();
+      }
+    };
 
-    return () => clearInterval(interval);
+    const interval = setInterval(pollStatus, 3000); // Increased to 3s
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, [scrapeStatuses, fetchCities, onCityChange]);
 
   const handleAddCity = async () => {

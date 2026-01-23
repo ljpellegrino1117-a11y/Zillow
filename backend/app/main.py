@@ -682,7 +682,7 @@ def get_amenity_counts(
 
 # ==================== AirDNA Endpoints ====================
 
-@app.post("/api/airdna", response_model=List[AirDNADataResponse])
+@app.post("/api/airdna", response_model=AirDNADataResponse)
 def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
     """Save AirDNA data for a city with bedroom range and optional amenities.
     
@@ -758,12 +758,6 @@ def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
         # Invalidate analysis cache when new AirDNA data is added
         analysis_cache.invalidate("discrepancy")
         return airdna
-
-
-@app.post("/api/airdna", response_model=AirDNADataResponse)
-def save_airdna_data_new(data: AirDNAInput, db: Session = Depends(get_db)):
-    """Alias for save_airdna_data."""
-    return save_airdna_data(data, db)
 
 
 @app.delete("/api/airdna/{airdna_id}")
