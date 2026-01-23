@@ -54,8 +54,7 @@ class ZillowListing(Base):
     
     # Detected amenities (scanned from description + amenities)
     has_pool = Column(Boolean, default=False, index=True)
-    has_waterview = Column(Boolean, default=False, index=True)
-    has_waterfront = Column(Boolean, default=False, index=True)
+    has_waterfront = Column(Boolean, default=False, index=True)  # Includes waterfront AND waterview
     has_basement = Column(Boolean, default=False, index=True)
     has_unfinished_basement = Column(Boolean, default=False, index=True)
     has_finished_basement = Column(Boolean, default=False, index=True)
@@ -115,8 +114,7 @@ class AirDNAData(Base):
     # NOTE: Extra rooms (office, den, loft) are NOT amenity filters - they determine potential bedrooms
     amenity_filter = Column(Text, nullable=True)  # JSON string of required amenities
     has_pool = Column(Boolean, default=False)
-    has_waterfront = Column(Boolean, default=False)
-    has_waterview = Column(Boolean, default=False)
+    has_waterfront = Column(Boolean, default=False)  # Includes waterfront AND waterview
     has_basement = Column(Boolean, default=False)
     has_garage = Column(Boolean, default=False)
     has_yard = Column(Boolean, default=False)

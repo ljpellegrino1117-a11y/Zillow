@@ -35,8 +35,7 @@ export interface ZillowListing {
   url: string | null;
   amenities_raw: string | null;
   has_pool: boolean;
-  has_waterview: boolean;
-  has_waterfront: boolean;
+  has_waterfront: boolean;  // Includes waterfront AND waterview
   has_basement: boolean;
   has_unfinished_basement: boolean;
   has_finished_basement: boolean;
@@ -77,8 +76,7 @@ export interface ZillowListing {
 
 export interface AirDNAAmenities {
   has_pool?: boolean;
-  has_waterfront?: boolean;
-  has_waterview?: boolean;
+  has_waterfront?: boolean;  // Includes waterfront AND waterview
   has_basement?: boolean;
   has_garage?: boolean;
   has_yard?: boolean;
@@ -95,8 +93,7 @@ export interface AirDNAData {
   average_annual_revenue: number;
   amenity_filter: string | null;
   has_pool: boolean;
-  has_waterfront: boolean;
-  has_waterview: boolean;
+  has_waterfront: boolean;  // Includes waterfront AND waterview
   has_basement: boolean;
   has_garage: boolean;
   has_yard: boolean;
@@ -139,8 +136,7 @@ export interface ListingStats {
 
 export interface AmenityFilters {
   has_pool?: boolean;
-  has_waterview?: boolean;
-  has_waterfront?: boolean;
+  has_waterfront?: boolean;  // Includes waterfront AND waterview
   has_basement?: boolean;
   has_unfinished_basement?: boolean;
   has_finished_basement?: boolean;

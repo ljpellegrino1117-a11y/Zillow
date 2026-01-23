@@ -166,8 +166,7 @@ async def run_scrape_job(
                     url=listing_data.get('url'),
                     amenities_raw=listing_data.get('amenities_raw'),
                     has_pool=listing_data.get('has_pool', False),
-                    has_waterview=listing_data.get('has_waterview', False),
-                    has_waterfront=listing_data.get('has_waterfront', False),
+                    has_waterfront=listing_data.get('has_waterfront', False),  # Includes waterfront AND waterview
                     has_basement=listing_data.get('has_basement', False),
                     has_unfinished_basement=listing_data.get('has_unfinished_basement', False),
                     has_finished_basement=listing_data.get('has_finished_basement', False),
@@ -313,8 +312,7 @@ def get_listings(
     has_creative_financing: Optional[bool] = None,
     # Amenity filters
     has_pool: Optional[bool] = None,
-    has_waterview: Optional[bool] = None,
-    has_waterfront: Optional[bool] = None,
+    has_waterfront: Optional[bool] = None,  # Includes waterfront AND waterview
     has_basement: Optional[bool] = None,
     has_unfinished_basement: Optional[bool] = None,
     has_finished_basement: Optional[bool] = None,
@@ -381,8 +379,6 @@ def get_listings(
     # Amenity filters (when True, require the amenity)
     if has_pool is True:
         query = query.filter(ZillowListing.has_pool == True)
-    if has_waterview is True:
-        query = query.filter(ZillowListing.has_waterview == True)
     if has_waterfront is True:
         query = query.filter(ZillowListing.has_waterfront == True)
     if has_basement is True:
@@ -515,8 +511,7 @@ def get_amenity_counts(
         "total": total,
         # Amenities
         "has_pool": query.filter(ZillowListing.has_pool == True).count(),
-        "has_waterview": query.filter(ZillowListing.has_waterview == True).count(),
-        "has_waterfront": query.filter(ZillowListing.has_waterfront == True).count(),
+        "has_waterfront": query.filter(ZillowListing.has_waterfront == True).count(),  # Includes waterfront AND waterview
         "has_basement": query.filter(ZillowListing.has_basement == True).count(),
         "has_unfinished_basement": query.filter(ZillowListing.has_unfinished_basement == True).count(),
         "has_finished_basement": query.filter(ZillowListing.has_finished_basement == True).count(),
@@ -685,7 +680,7 @@ def get_discrepancy_analysis(
     max_bedrooms: int = 8,
     # Amenity filters for analysis
     has_pool: Optional[bool] = None,
-    has_waterview: Optional[bool] = None,
+    has_waterfront: Optional[bool] = None,  # Includes waterfront AND waterview
     has_basement: Optional[bool] = None,
     has_unfinished_basement: Optional[bool] = None,
     db: Session = Depends(get_db)
@@ -726,8 +721,8 @@ def get_discrepancy_analysis(
             # Apply amenity filters
             if has_pool is True:
                 base_query = base_query.filter(ZillowListing.has_pool == True)
-            if has_waterview is True:
-                base_query = base_query.filter(ZillowListing.has_waterview == True)
+            if has_waterfront is True:
+                base_query = base_query.filter(ZillowListing.has_waterfront == True)
             if has_basement is True:
                 base_query = base_query.filter(ZillowListing.has_basement == True)
             if has_unfinished_basement is True:

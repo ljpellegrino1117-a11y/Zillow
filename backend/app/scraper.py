@@ -37,11 +37,9 @@ AMENITY_PATTERNS = {
     'has_pool': [
         r'\bpool\b', r'\bswimming\b', r'\bswim\b'
     ],
-    'has_waterview': [
+    'has_waterfront': [  # Combined waterfront AND waterview
         r'\bwater\s*view\b', r'\bwaterview\b', r'\bocean\s*view\b', r'\blake\s*view\b',
-        r'\briver\s*view\b', r'\bbay\s*view\b', r'\bsea\s*view\b', r'\bbeach\s*view\b'
-    ],
-    'has_waterfront': [
+        r'\briver\s*view\b', r'\bbay\s*view\b', r'\bsea\s*view\b', r'\bbeach\s*view\b',
         r'\bwaterfront\b', r'\bwater\s*front\b', r'\boceanfront\b', r'\blakefront\b',
         r'\briverfront\b', r'\bbeachfront\b', r'\bbayfront\b'
     ],
@@ -1072,7 +1070,7 @@ if __name__ == "__main__":
         def on_found(listing):
             amenities = []
             if listing.get('has_pool'): amenities.append('Pool')
-            if listing.get('has_waterview'): amenities.append('Waterview')
+            if listing.get('has_waterfront'): amenities.append('Waterfront')
             if listing.get('has_basement'): amenities.append('Basement')
             am_str = f" [{', '.join(amenities)}]" if amenities else ""
             print(f"  + {listing['bedrooms']}BR ${listing['price']:,.0f}/mo{am_str} - {listing['address'][:40]}")
@@ -1089,12 +1087,12 @@ if __name__ == "__main__":
         
         # Summary
         pools = sum(1 for l in listings if l.get('has_pool'))
-        waterviews = sum(1 for l in listings if l.get('has_waterview'))
+        waterfronts = sum(1 for l in listings if l.get('has_waterfront'))
         basements = sum(1 for l in listings if l.get('has_basement'))
         
         print(f"\nAmenity counts:")
         print(f"  Pool: {pools}")
-        print(f"  Waterview: {waterviews}")
+        print(f"  Waterfront/View: {waterfronts}")
         print(f"  Basement: {basements}")
     
     asyncio.run(main())

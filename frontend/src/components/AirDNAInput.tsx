@@ -15,8 +15,7 @@ const BEDROOM_OPTIONS = [3, 4, 5, 6, 7, 8];
 // NOTE: Extra rooms (office, den, loft) are NOT here - they determine potential bedrooms on listings
 const AMENITY_OPTIONS = [
   { key: 'has_pool', label: 'Pool', icon: '🏊' },
-  { key: 'has_waterfront', label: 'Waterfront', icon: '🏖️' },
-  { key: 'has_waterview', label: 'Water View', icon: '🌊' },
+  { key: 'has_waterfront', label: 'Waterfront/View', icon: '🌊' },
   { key: 'has_basement', label: 'Basement', icon: '⬇️' },
   { key: 'has_garage', label: 'Garage', icon: '🚗' },
   { key: 'has_yard', label: 'Yard', icon: '🌳' },
@@ -153,8 +152,7 @@ export default function AirDNAInput({ onDataSaved }: Props) {
   const getAmenityBadges = (data: AirDNAData) => {
     const badges = [];
     if (data.has_pool) badges.push({ label: 'Pool', icon: '🏊' });
-    if (data.has_waterfront) badges.push({ label: 'Waterfront', icon: '🏖️' });
-    if (data.has_waterview) badges.push({ label: 'Water View', icon: '🌊' });
+    if (data.has_waterfront) badges.push({ label: 'Waterfront/View', icon: '🌊' });
     if (data.has_basement) badges.push({ label: 'Basement', icon: '⬇️' });
     if (data.has_garage) badges.push({ label: 'Garage', icon: '🚗' });
     if (data.has_yard) badges.push({ label: 'Yard', icon: '🌳' });

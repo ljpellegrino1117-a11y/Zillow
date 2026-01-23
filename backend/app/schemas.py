@@ -35,8 +35,7 @@ class CityResponse(CityBase):
 class AmenitiesFilter(BaseModel):
     """Filter for required/optional amenities"""
     has_pool: Optional[bool] = None
-    has_waterview: Optional[bool] = None
-    has_waterfront: Optional[bool] = None
+    has_waterfront: Optional[bool] = None  # Includes waterfront AND waterview
     has_basement: Optional[bool] = None
     has_unfinished_basement: Optional[bool] = None
     has_finished_basement: Optional[bool] = None
@@ -73,8 +72,7 @@ class ZillowListingResponse(ZillowListingBase):
     city_id: int
     amenities_raw: Optional[str] = None
     has_pool: bool = False
-    has_waterview: bool = False
-    has_waterfront: bool = False
+    has_waterfront: bool = False  # Includes waterfront AND waterview
     has_basement: bool = False
     has_unfinished_basement: bool = False
     has_finished_basement: bool = False
@@ -120,8 +118,7 @@ class ZillowListingResponse(ZillowListingBase):
 class AirDNAAmenities(BaseModel):
     """Amenity filters for AirDNA data (property features, NOT extra rooms)"""
     has_pool: bool = False
-    has_waterfront: bool = False
-    has_waterview: bool = False
+    has_waterfront: bool = False  # Includes waterfront AND waterview
     has_basement: bool = False
     has_garage: bool = False
     has_yard: bool = False
@@ -145,8 +142,7 @@ class AirDNADataResponse(BaseModel):
     average_annual_revenue: float
     amenity_filter: Optional[str] = None
     has_pool: bool = False
-    has_waterfront: bool = False
-    has_waterview: bool = False
+    has_waterfront: bool = False  # Includes waterfront AND waterview
     has_basement: bool = False
     has_garage: bool = False
     has_yard: bool = False

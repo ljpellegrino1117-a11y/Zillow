@@ -139,8 +139,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
   const getAmenityBadges = (listing: ZillowListing) => {
     const badges = [];
     if (listing.has_pool) badges.push({ label: 'Pool', icon: '🏊' });
-    if (listing.has_waterview) badges.push({ label: 'Water View', icon: '🌊' });
-    if (listing.has_waterfront) badges.push({ label: 'Waterfront', icon: '🏖️' });
+    if (listing.has_waterfront) badges.push({ label: 'Waterfront/View', icon: '🌊' });
     if (listing.has_unfinished_basement) badges.push({ label: 'Unfin. Basement', icon: '🏚️' });
     if (listing.has_finished_basement) badges.push({ label: 'Fin. Basement', icon: '🏠' });
     if (listing.has_garage) badges.push({ label: 'Garage', icon: '🚗' });

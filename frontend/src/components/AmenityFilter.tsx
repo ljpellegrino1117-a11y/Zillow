@@ -19,8 +19,7 @@ const EXTRA_ROOM_OPTIONS = [
 
 const AMENITY_OPTIONS = [
   { key: 'has_pool', label: 'Pool', icon: '🏊' },
-  { key: 'has_waterview', label: 'Water View', icon: '🌊' },
-  { key: 'has_waterfront', label: 'Waterfront', icon: '🏖️' },
+  { key: 'has_waterfront', label: 'Waterfront/View', icon: '🌊' },
   { key: 'has_unfinished_basement', label: 'Unfinished Basement', icon: '🏚️' },
   { key: 'has_finished_basement', label: 'Finished Basement', icon: '🏠' },
   { key: 'has_basement', label: 'Any Basement', icon: '⬇️' },
