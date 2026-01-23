@@ -186,6 +186,177 @@ async def fetch_revenue_metrics(
         return None
 
 
+# Amenity mapping from Airbtics to our categories
+# Our waterfront category includes multiple Airbtics amenities
+AMENITY_FILTERS = [
+    {
+        "name": "pool",
+        "our_field": "has_pool",
+        "airbtics_filters": {"pool": True}
+    },
+    {
+        "name": "hot_tub", 
+        "our_field": "has_hot_tub",
+        "airbtics_filters": {"hot_tub": True}
+    },
+    {
+        "name": "waterfront",
+        "our_field": "has_waterfront",
+        # Waterfront includes beachfront, amazing_views, lake views, ocean views
+        "airbtics_filters": {"beachfront": True}  # Will also check amazing_views
+    },
+    {
+        "name": "pets",
+        "our_field": "has_pet_friendly", 
+        "airbtics_filters": {"pets": True}
+    },
+]
+
+
+async def search_listings_by_market(
+    market_id: str,
+    bedrooms: int,
+    amenity_filters: Optional[Dict[str, bool]] = None,
+    limit: int = 100
+) -> List[Dict[str, Any]]:
+    """
+    Search listings in a market with optional amenity filters.
+    Uses POST /listings/search/market endpoint.
+    
+    Args:
+        market_id: Airbtics market identifier
+        bedrooms: Number of bedrooms to filter by
+        amenity_filters: Dict of amenity filters (e.g., {"pool": True, "pets": True})
+        limit: Maximum listings to return
+    
+    Returns:
+        List of listings with their revenue data
+    """
+    api_key = get_api_key()
+    if not api_key:
+        return []
+    
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Build request body
+            body = {
+                "market_id": market_id,
+                "bedrooms": bedrooms,
+                "limit": limit
+            }
+            
+            # Add amenity filters if provided
+            if amenity_filters:
+                body["amenities"] = amenity_filters
+            
+            response = await client.post(
+                f"{AIRBTICS_BASE_URL}/listings/search/market",
+                json=body,
+                headers={"x-api-key": api_key}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Response could be a list or have a "listings" key
+                listings = data if isinstance(data, list) else data.get("listings", data.get("message", []))
+                return listings if listings else []
+            else:
+                logger.warning(f"Listings search failed: {response.status_code} - {response.text[:200]}")
+                return []
+                
+    except Exception as e:
+        logger.error(f"Error searching listings: {e}")
+        return []
+
+
+def calculate_revenue_from_listings(listings: List[Dict]) -> Optional[Dict[str, Any]]:
+    """
+    Calculate revenue percentiles from a list of listings.
+    
+    Args:
+        listings: List of listing dicts with revenue data
+    
+    Returns:
+        Dict with p25, p50, p75, p90 annual revenue values, or None if insufficient data
+    """
+    if not listings or len(listings) < 3:
+        return None
+    
+    # Extract annual revenue from listings
+    # Revenue might be in different fields depending on API response
+    revenues = []
+    for listing in listings:
+        # Try different possible field names
+        revenue = (
+            listing.get("annual_revenue") or 
+            listing.get("revenue") or 
+            listing.get("ltm_revenue") or  # Last twelve months
+            listing.get("estimated_revenue")
+        )
+        if revenue and revenue > 0:
+            revenues.append(float(revenue))
+    
+    if len(revenues) < 3:
+        return None
+    
+    # Sort for percentile calculation
+    revenues.sort()
+    n = len(revenues)
+    
+    def percentile(data, p):
+        """Calculate p-th percentile"""
+        k = (len(data) - 1) * p / 100
+        f = int(k)
+        c = f + 1 if f + 1 < len(data) else f
+        return data[f] + (k - f) * (data[c] - data[f]) if f != c else data[f]
+    
+    return {
+        "p25": round(percentile(revenues, 25), 2),
+        "p50": round(percentile(revenues, 50), 2),
+        "p75": round(percentile(revenues, 75), 2),
+        "p90": round(percentile(revenues, 90), 2),
+        "listing_count": len(revenues)
+    }
+
+
+async def fetch_amenity_filtered_revenue(
+    market_id: str,
+    bedrooms: int,
+    amenity_name: str,
+    airbtics_filters: Dict[str, bool]
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch revenue for listings with specific amenities.
+    
+    Args:
+        market_id: Airbtics market identifier
+        bedrooms: Number of bedrooms
+        amenity_name: Name of amenity for logging
+        airbtics_filters: Airbtics amenity filter dict
+    
+    Returns:
+        Revenue percentiles dict or None
+    """
+    await asyncio.sleep(API_RATE_LIMIT_DELAY)  # Rate limiting
+    
+    listings = await search_listings_by_market(
+        market_id=market_id,
+        bedrooms=bedrooms,
+        amenity_filters=airbtics_filters
+    )
+    
+    if not listings:
+        logger.debug(f"No listings found for {bedrooms}BR with {amenity_name}")
+        return None
+    
+    revenue_data = calculate_revenue_from_listings(listings)
+    
+    if revenue_data:
+        logger.info(f"  {amenity_name}: {len(listings)} listings, p50=${revenue_data['p50']:,.0f}/yr")
+    
+    return revenue_data
+
+
 async def sync_city_data(
     db: Session,
     city_record: City,
@@ -273,15 +444,15 @@ async def sync_city_data(
                     logger.debug(f"Skipping {city}, {state} {bedrooms}BR - data is fresh")
                     continue
         
-        # Fetch revenue data
+        # Fetch base revenue data (no amenity filter)
         revenue_data = await fetch_revenue_metrics(market_id, bedrooms)
         
+        now = datetime.utcnow()
+        
         if revenue_data:
-            now = datetime.utcnow()
-            
             if existing:
                 # Update existing entry
-                existing.average_annual_revenue = revenue_data["p50"]  # Use median as default
+                existing.average_annual_revenue = revenue_data["p50"]
                 existing.revenue_p25 = revenue_data["p25"]
                 existing.revenue_p50 = revenue_data["p50"]
                 existing.revenue_p75 = revenue_data["p75"]
@@ -291,13 +462,13 @@ async def sync_city_data(
                 existing.updated_at = now
                 result["entries_updated"] += 1
             else:
-                # Create new entry
+                # Create new entry (base - no amenity filter)
                 new_entry = AirDNAData(
                     city_id=city_record.id,
                     zip_code=zip_code,
                     bedrooms_min=bedrooms,
                     bedrooms_max=bedrooms,
-                    average_annual_revenue=revenue_data["p50"],  # Use median as default
+                    average_annual_revenue=revenue_data["p50"],
                     revenue_p25=revenue_data["p25"],
                     revenue_p50=revenue_data["p50"],
                     revenue_p75=revenue_data["p75"],
@@ -313,7 +484,67 @@ async def sync_city_data(
             
             logger.info(f"Synced {city}, {state} {bedrooms}BR: p50=${revenue_data['p50']:,.0f}/yr")
         else:
-            result["errors"].append(f"No data for {bedrooms}BR")
+            result["errors"].append(f"No base data for {bedrooms}BR")
+        
+        # Now fetch amenity-filtered revenue data
+        for amenity_config in AMENITY_FILTERS:
+            amenity_name = amenity_config["name"]
+            our_field = amenity_config["our_field"]
+            airbtics_filters = amenity_config["airbtics_filters"]
+            
+            # Check if we already have recent amenity-filtered data
+            existing_amenity = db.query(AirDNAData).filter(
+                AirDNAData.city_id == city_record.id,
+                AirDNAData.bedrooms_min == bedrooms,
+                AirDNAData.bedrooms_max == bedrooms,
+                AirDNAData.source == 'airbtics',
+                getattr(AirDNAData, our_field) == True
+            ).first()
+            
+            if existing_amenity and not force_refresh:
+                if existing_amenity.last_api_fetch:
+                    age = datetime.utcnow() - existing_amenity.last_api_fetch
+                    if age.days < REFRESH_INTERVAL_DAYS:
+                        continue  # Skip, data is fresh
+            
+            # Fetch amenity-filtered revenue
+            amenity_revenue = await fetch_amenity_filtered_revenue(
+                market_id, bedrooms, amenity_name, airbtics_filters
+            )
+            
+            if amenity_revenue:
+                if existing_amenity:
+                    # Update existing
+                    existing_amenity.average_annual_revenue = amenity_revenue["p50"]
+                    existing_amenity.revenue_p25 = amenity_revenue["p25"]
+                    existing_amenity.revenue_p50 = amenity_revenue["p50"]
+                    existing_amenity.revenue_p75 = amenity_revenue["p75"]
+                    existing_amenity.revenue_p90 = amenity_revenue["p90"]
+                    existing_amenity.last_api_fetch = now
+                    existing_amenity.updated_at = now
+                    result["entries_updated"] += 1
+                else:
+                    # Create new amenity-filtered entry
+                    amenity_entry = AirDNAData(
+                        city_id=city_record.id,
+                        zip_code=zip_code,
+                        bedrooms_min=bedrooms,
+                        bedrooms_max=bedrooms,
+                        average_annual_revenue=amenity_revenue["p50"],
+                        revenue_p25=amenity_revenue["p25"],
+                        revenue_p50=amenity_revenue["p50"],
+                        revenue_p75=amenity_revenue["p75"],
+                        revenue_p90=amenity_revenue["p90"],
+                        source='airbtics',
+                        airbtics_market_id=market_id,
+                        last_api_fetch=now,
+                        created_at=now,
+                        updated_at=now,
+                        # Set the amenity flag
+                        **{our_field: True}
+                    )
+                    db.add(amenity_entry)
+                    result["entries_created"] += 1
     
     db.commit()
     return result

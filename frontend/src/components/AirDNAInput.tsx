@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Save, DollarSign, Loader2, Trash2, Plus, Check, X, Minus, Upload, Camera, MessageSquare, Send, Image as ImageIcon, History, ChevronDown, ChevronUp, Calendar, Zap, RefreshCw, Cloud, Database } from 'lucide-react';
 import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, analyzeScreenshot, continueAIConversation, getSavedAIAnalyses, getAIAnalysisDetail, syncAirbticsData, syncAirbticsCity, getAirbticsSyncStatus, getAirbticsCityStatuses, City, AirDNAData, AirDNAAmenities, SavedAIAnalysis, AirbticsSyncStatus, AirbticsCityStatus } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
+import CityAutocomplete from './CityAutocomplete';
 
 interface Props {
   onDataSaved?: () => void;
@@ -826,22 +827,24 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
         </div>
       )}
 
-      {/* City selector */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
+      {/* City selector with autocomplete */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div className="md:col-span-2">
           <label className="input-label">City *</label>
-          <select
-            value={selectedCity && selectedState ? `${selectedCity}|${selectedState}` : ''}
-            onChange={(e) => handleCitySelect(e.target.value)}
-            className="input"
-          >
-            <option value="">Select a city...</option>
-            {cities.map(c => (
-              <option key={c.id} value={`${c.city}|${c.state}`}>
-                {c.city}, {c.state}
-              </option>
-            ))}
-          </select>
+          <CityAutocomplete
+            value={selectedCity}
+            onChange={(city, state) => {
+              setSelectedCity(city);
+              setSelectedState(state);
+              setZipCode('');
+            }}
+            placeholder="Type a city name..."
+          />
+          {selectedState && (
+            <p className="text-xs text-gray-500 mt-1">
+              Selected: {selectedCity}, {selectedState}
+            </p>
+          )}
         </div>
 
         <div>
