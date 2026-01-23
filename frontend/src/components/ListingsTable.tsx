@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Building2, ExternalLink, Loader2, Filter, Download } from 'lucide-react';
 import { getListings, getCities, getAmenityCounts, ZillowListing, City, AmenityFilters, AmenityCounts } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
@@ -17,6 +17,21 @@ const LISTING_TYPE_OPTIONS = [
   { value: 'for_sale', label: 'For Sale Only' },
 ];
 
+// Debounce hook for performance
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
 export default function ListingsTable({ refreshTrigger }: Props) {
   const [listings, setListings] = useState<ZillowListing[]>([]);
   const [cities, setCities] = useState<City[]>([]);
@@ -29,6 +44,10 @@ export default function ListingsTable({ refreshTrigger }: Props) {
   const [amenityCounts, setAmenityCounts] = useState<AmenityCounts | null>(null);
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
+  
+  // Debounce filter changes to avoid too many API calls
+  const debouncedFilters = useDebounce(amenityFilters.required, 300);
+  const fetchController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const fetchCities = async () => {
@@ -43,12 +62,18 @@ export default function ListingsTable({ refreshTrigger }: Props) {
   }, [refreshTrigger]);
 
   useEffect(() => {
+    // Cancel previous request
+    if (fetchController.current) {
+      fetchController.current.abort();
+    }
+    fetchController.current = new AbortController();
+
     const fetchListings = async () => {
       setLoading(true);
       try {
         // Convert required filters to API format
         const apiFilters: AmenityFilters = {};
-        Object.keys(amenityFilters.required || {}).forEach(key => {
+        Object.keys(debouncedFilters || {}).forEach(key => {
           (apiFilters as Record<string, boolean>)[key] = true;
         });
 
@@ -61,20 +86,26 @@ export default function ListingsTable({ refreshTrigger }: Props) {
           undefined,
           undefined,
           apiFilters,
-          500, // Get more listings for sorting
+          200, // Limit for performance
           0,
           selectedListingType || undefined,
           showCreativeOnly || undefined
         );
         setListings(data);
-      } catch (error) {
-        console.error('Failed to fetch listings:', error);
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') {
+          console.error('Failed to fetch listings:', error);
+        }
       } finally {
         setLoading(false);
       }
     };
     fetchListings();
-  }, [selectedCity, selectedState, selectedBedrooms, amenityFilters.required, selectedListingType, showCreativeOnly, refreshTrigger]);
+    
+    return () => {
+      fetchController.current?.abort();
+    };
+  }, [selectedCity, selectedState, selectedBedrooms, debouncedFilters, selectedListingType, showCreativeOnly, refreshTrigger]);
 
   useEffect(() => {
     const fetchCounts = async () => {

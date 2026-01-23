@@ -1,11 +1,14 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
+from functools import lru_cache
 import asyncio
 import logging
+import time
 
 from .database import engine, get_db, Base
 from .models import City, ZillowListing, AirDNAData
@@ -24,11 +27,47 @@ Base.metadata.create_all(bind=engine)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Simple in-memory cache with TTL
+class SimpleCache:
+    def __init__(self, ttl_seconds: int = 30):
+        self.cache: Dict[str, Any] = {}
+        self.timestamps: Dict[str, float] = {}
+        self.ttl = ttl_seconds
+    
+    def get(self, key: str) -> Optional[Any]:
+        if key in self.cache:
+            if time.time() - self.timestamps[key] < self.ttl:
+                return self.cache[key]
+            else:
+                del self.cache[key]
+                del self.timestamps[key]
+        return None
+    
+    def set(self, key: str, value: Any):
+        self.cache[key] = value
+        self.timestamps[key] = time.time()
+    
+    def invalidate(self, pattern: str = None):
+        if pattern is None:
+            self.cache.clear()
+            self.timestamps.clear()
+        else:
+            keys_to_delete = [k for k in self.cache if pattern in k]
+            for k in keys_to_delete:
+                del self.cache[k]
+                del self.timestamps[k]
+
+# Global cache instance
+cache = SimpleCache(ttl_seconds=30)
+
 app = FastAPI(
     title="Zillow Arbitrage API",
     description="API for scraping Zillow rentals and analyzing arbitrage opportunities",
     version="2.0.0"
 )
+
+# Add GZip compression for responses > 500 bytes
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # CORS for frontend
 app.add_middleware(
@@ -47,8 +86,14 @@ scrape_jobs = {}
 
 @app.get("/api/cities", response_model=List[CityResponse])
 def get_cities(db: Session = Depends(get_db)):
-    """Get all cities in the database."""
-    return db.query(City).all()
+    """Get all cities in the database (cached)."""
+    cached = cache.get("cities")
+    if cached is not None:
+        return cached
+    
+    result = db.query(City).all()
+    cache.set("cities", result)
+    return result
 
 
 @app.post("/api/cities", response_model=CityResponse)
@@ -72,6 +117,7 @@ def create_city(city_data: CityCreate, db: Session = Depends(get_db)):
     db.add(city)
     db.commit()
     db.refresh(city)
+    cache.invalidate("cities")  # Invalidate cache
     return city
 
 
@@ -96,6 +142,7 @@ def delete_city(city: str, state: str, zip_code: Optional[str] = None, db: Sessi
     db.query(AirDNAData).filter(AirDNAData.city_id == city_obj.id).delete()
     db.delete(city_obj)
     db.commit()
+    cache.invalidate()  # Invalidate all caches
     zip_info = f" {zip_code}" if zip_code else ""
     return {"message": f"Deleted {city}, {state}{zip_info} and all associated data"}
 

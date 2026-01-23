@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -22,6 +22,16 @@ interface Props {
 const BEDROOM_OPTIONS = [3, 4, 5, 6, 7, 8];
 const columnHelper = createColumnHelper<DiscrepancyResult>();
 
+// Debounce hook
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
 export default function DiscrepancyTable({ refreshTrigger }: Props) {
   const [data, setData] = useState<DiscrepancyResult[]>([]);
   const [cities, setCities] = useState<City[]>([]);
@@ -32,8 +42,11 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
   const [amenityFilters, setAmenityFilters] = useState<RequiredOptionalFilters>({ required: {}, optional: {} });
   const [showFilters, setShowFilters] = useState(false);
   const [sorting, setSorting] = useState<SortingState>([
-    { id: 'airdna_to_rent_ratio', desc: true }, // Default sort by AirDNA to rent ratio
+    { id: 'airdna_to_rent_ratio', desc: true },
   ]);
+  
+  // Debounce filter changes
+  const debouncedFilters = useDebounce(amenityFilters.required, 300);
 
   useEffect(() => {
     const fetchCities = async () => {
@@ -47,12 +60,12 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
     fetchCities();
   }, [refreshTrigger]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       // Convert required filters to API format
       const apiFilters: AmenityFilters = {};
-      Object.keys(amenityFilters.required || {}).forEach(key => {
+      Object.keys(debouncedFilters || {}).forEach(key => {
         (apiFilters as Record<string, boolean>)[key] = true;
       });
 
@@ -79,11 +92,11 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedCity, selectedState, selectedBedrooms, debouncedFilters]);
 
   useEffect(() => {
     fetchData();
-  }, [refreshTrigger, selectedCity, selectedState, selectedBedrooms, amenityFilters.required]);
+  }, [fetchData, refreshTrigger]);
 
   const handleCitySelect = (value: string) => {
     if (!value) {
