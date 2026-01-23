@@ -165,6 +165,15 @@ class AirDNADataResponse(BaseModel):
     bedrooms_min: int
     bedrooms_max: int
     average_annual_revenue: float
+    # Revenue percentiles (annual values)
+    revenue_p25: Optional[float] = None
+    revenue_p50: Optional[float] = None
+    revenue_p75: Optional[float] = None
+    revenue_p90: Optional[float] = None
+    # Data source
+    source: str = 'manual'  # 'manual', 'airbtics', 'screenshot'
+    airbtics_market_id: Optional[str] = None
+    last_api_fetch: Optional[datetime] = None
     amenity_filter: Optional[str] = None
     # Tri-state amenities: True = WITH, False = WITHOUT, None = ANY
     has_pool: Optional[bool] = None
@@ -260,3 +269,48 @@ class AIScreenshotAnalysisResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# Airbtics API Schemas
+class AirbticsMarketResponse(BaseModel):
+    id: int
+    city: str
+    state: str
+    zip_code: Optional[str] = None
+    market_id: str
+    market_name: Optional[str] = None
+    last_updated: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class AirbticsSyncRequest(BaseModel):
+    """Request to sync Airbtics data"""
+    city_ids: Optional[List[int]] = None  # If None, sync all cities
+    force_refresh: bool = False  # Ignore 6-month check
+
+
+class AirbticsSyncStatus(BaseModel):
+    """Status of Airbtics sync operation"""
+    status: str  # 'idle', 'syncing', 'completed', 'error'
+    total_cities: int = 0
+    synced_cities: int = 0
+    failed_cities: int = 0
+    current_city: Optional[str] = None
+    last_sync: Optional[datetime] = None
+    message: str = ""
+    errors: List[str] = []
+
+
+class AirbticsCityStatus(BaseModel):
+    """Status of Airbtics data for a specific city"""
+    city_id: int
+    city: str
+    state: str
+    zip_code: Optional[str] = None
+    has_airbtics_data: bool = False
+    market_id: Optional[str] = None
+    last_fetch: Optional[datetime] = None
+    entries_count: int = 0
+    needs_refresh: bool = False  # True if >6 months old

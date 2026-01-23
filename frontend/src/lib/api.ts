@@ -143,6 +143,15 @@ export interface AirDNAData {
   bedrooms_min: number;
   bedrooms_max: number;
   average_annual_revenue: number;
+  // Revenue percentiles (annual values)
+  revenue_p25: number | null;
+  revenue_p50: number | null;
+  revenue_p75: number | null;
+  revenue_p90: number | null;
+  // Data source
+  source: 'manual' | 'airbtics' | 'screenshot';
+  airbtics_market_id: string | null;
+  last_api_fetch: string | null;
   amenity_filter: string | null;
   // Tri-state amenities: true = WITH, false = WITHOUT, null = ANY
   has_pool: boolean | null;
@@ -153,6 +162,7 @@ export interface AirDNAData {
   has_yard: boolean | null;
   has_pet_friendly: boolean | null;
   has_mother_in_law: boolean | null;
+  created_at: string | null;
   updated_at: string;
 }
 
@@ -530,5 +540,65 @@ export const getSavedAIAnalyses = async (limit: number = 50): Promise<SavedAIAna
 
 export const getAIAnalysisDetail = async (analysisId: number): Promise<AIAnalysisDetail> => {
   const response = await axios.get(`${API_BASE}/ai/analysis/${analysisId}`);
+  return response.data;
+};
+
+// ==================== Airbtics API ====================
+
+export interface AirbticsSyncStatus {
+  status: 'idle' | 'syncing' | 'completed' | 'error';
+  total_cities: number;
+  synced_cities: number;
+  failed_cities: number;
+  current_city: string | null;
+  last_sync: string | null;
+  message: string;
+  errors: string[];
+}
+
+export interface AirbticsCityStatus {
+  city_id: number;
+  city: string;
+  state: string;
+  zip_code: string | null;
+  has_airbtics_data: boolean;
+  market_id: string | null;
+  last_fetch: string | null;
+  entries_count: number;
+  needs_refresh: boolean;
+}
+
+export const syncAirbticsData = async (
+  cityIds?: number[],
+  forceRefresh: boolean = false
+): Promise<{ message: string }> => {
+  const response = await axios.post(`${API_BASE}/airbtics/sync`, {
+    city_ids: cityIds || null,
+    force_refresh: forceRefresh
+  });
+  invalidateCache('airdna');
+  invalidateCache('discrepancy');
+  return response.data;
+};
+
+export const syncAirbticsCity = async (
+  cityId: number,
+  forceRefresh: boolean = false
+): Promise<any> => {
+  const response = await axios.post(
+    `${API_BASE}/airbtics/sync/${cityId}?force_refresh=${forceRefresh}`
+  );
+  invalidateCache('airdna');
+  invalidateCache('discrepancy');
+  return response.data;
+};
+
+export const getAirbticsSyncStatus = async (): Promise<AirbticsSyncStatus> => {
+  const response = await axios.get(`${API_BASE}/airbtics/status`);
+  return response.data;
+};
+
+export const getAirbticsCityStatuses = async (): Promise<AirbticsCityStatus[]> => {
+  const response = await axios.get(`${API_BASE}/airbtics/cities`);
   return response.data;
 };

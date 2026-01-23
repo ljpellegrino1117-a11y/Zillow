@@ -1,13 +1,15 @@
 # Zillow Rental Arbitrage Tool
 
-A web application for finding rental arbitrage opportunities by comparing Zillow rental prices with AirDNA short-term rental revenue data.
+A web application for finding rental arbitrage opportunities by comparing Zillow rental prices with short-term rental revenue data from Airbtics and AirDNA.
 
 ## Features
 
-- **Zillow Scraper**: Scrapes rental listings by zip code (3-8 bedrooms)
-- **AirDNA Input**: Manual input for AirDNA average revenue data
+- **Zillow Scraper**: Scrapes rental listings by city/zip code (1-8 bedrooms)
+- **Airbtics API Integration**: Auto-fetches STR revenue data for all cities (primary method)
+- **AirDNA Input**: Manual input or AI screenshot analysis (backup method)
 - **Discrepancy Analysis**: Compares rental costs vs. potential STR revenue
-- **Sortable Dashboard**: Find the best arbitrage opportunities
+- **AI-Powered Analysis**: Opportunity scoring, strengths/weaknesses, recommendations
+- **Revenue Percentiles**: p25, p50, p75, p90 revenue data for flexible analysis
 
 ## Architecture
 
@@ -158,12 +160,24 @@ This is a monorepo with separate backend and frontend services. Deploy each as a
 ### Environment Variables
 
 **Backend:**
-- `SCRAPER_API_KEY` - Your ScraperAPI key
+- `SCRAPER_API_KEY` - Your ScraperAPI key for Zillow scraping
+- `AIRBTICS_API_KEY` - Your Airbtics API key for STR revenue data (primary data source)
+- `OPENAI_API_KEY` - Your OpenAI API key for AI screenshot analysis (optional)
 - `PORT` - Set automatically by Railway
 
 **Frontend:**
-- `BACKEND_URL` - URL of the deployed backend service
+- `BACKEND_URL` - URL of the deployed backend service (include https://)
 - `PORT` - Set automatically by Railway
+
+### Airbtics API
+
+Airbtics is the primary source for short-term rental revenue data:
+- **Auto-sync on startup**: Fetches data for all cities that need refresh
+- **6-month refresh**: Data is automatically refreshed every 6 months
+- **Bedroom coverage**: Fetches revenue for 1-8 bedroom properties
+- **Revenue percentiles**: p25, p50 (median), p75, p90 for flexible analysis
+
+Get your API key at: https://airbtics.com/api-pricing
 
 ## Disclaimer
 

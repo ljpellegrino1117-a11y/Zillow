@@ -122,7 +122,18 @@ class AirDNAData(Base):
     zip_code = Column(String(10), nullable=True, index=True)  # Optional zip code for granular data
     bedrooms_min = Column(Integer, nullable=False)  # Min bedrooms (or exact if max is same)
     bedrooms_max = Column(Integer, nullable=False)  # Max bedrooms (or exact if same as min)
-    average_annual_revenue = Column(Float, nullable=False)  # Annual revenue from AirDNA
+    average_annual_revenue = Column(Float, nullable=False)  # Annual revenue (selected percentile or manual)
+    
+    # Revenue percentiles from Airbtics API (monthly values, multiply by 12 for annual)
+    revenue_p25 = Column(Float, nullable=True)  # 25th percentile - conservative
+    revenue_p50 = Column(Float, nullable=True)  # 50th percentile - median (default)
+    revenue_p75 = Column(Float, nullable=True)  # 75th percentile - above average
+    revenue_p90 = Column(Float, nullable=True)  # 90th percentile - top performers
+    
+    # Data source tracking
+    source = Column(String(20), default='manual', index=True)  # 'manual', 'airbtics', 'screenshot'
+    airbtics_market_id = Column(String(100), nullable=True)  # Airbtics market identifier
+    last_api_fetch = Column(DateTime, nullable=True, index=True)  # For 6-month refresh tracking
     
     # Amenity filters - tri-state: True=WITH, False=WITHOUT, None=ANY
     # NOTE: Extra rooms (office, den, loft) are NOT amenity filters - they determine potential bedrooms
@@ -148,6 +159,26 @@ class AirDNAData(Base):
     # Composite indexes for faster queries
     __table_args__ = (
         Index('idx_airdna_city_bedrooms', 'city_id', 'bedrooms_min', 'bedrooms_max'),
+        Index('idx_airdna_source', 'source'),
+    )
+
+
+class AirbticsMarket(Base):
+    """Cache for Airbtics market IDs to avoid repeated searches"""
+    __tablename__ = "airbtics_markets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    city = Column(String(100), nullable=False)
+    state = Column(String(50), nullable=False)
+    zip_code = Column(String(10), nullable=True)
+    market_id = Column(String(100), nullable=False)  # Airbtics market identifier
+    market_name = Column(String(200), nullable=True)  # Display name from API
+    country_code = Column(String(10), default='US')
+    last_updated = Column(DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        UniqueConstraint('city', 'state', 'zip_code', name='unique_airbtics_market'),
+        Index('idx_airbtics_market_lookup', 'city', 'state', 'zip_code'),
     )
 
 

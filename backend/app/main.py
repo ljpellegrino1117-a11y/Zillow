@@ -13,16 +13,18 @@ import base64
 import os
 
 from .database import engine, get_db, Base
-from .models import City, ZillowListing, AirDNAData, AIScreenshotAnalysis
+from .models import City, ZillowListing, AirDNAData, AIScreenshotAnalysis, AirbticsMarket
 from .schemas import (
     CityCreate, CityResponse,
     ZillowListingResponse,
     AirDNAInput, AirDNADataResponse,
     DiscrepancyResult,
     ScrapeRequest, ScrapeStatus,
-    AIScreenshotAnalysisResponse
+    AIScreenshotAnalysisResponse,
+    AirbticsSyncRequest, AirbticsSyncStatus, AirbticsCityStatus
 )
 from .scraper import scrape_zillow
+from . import airbtics
 from datetime import timedelta
 
 # Create tables
@@ -1458,6 +1460,124 @@ def get_ai_analysis(analysis_id: int, db: Session = Depends(get_db)):
     }
 
 
+# ==================== Airbtics API Integration ====================
+
+@app.post("/api/airbtics/sync")
+async def sync_airbtics_data(
+    request: AirbticsSyncRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger Airbtics data sync for all cities or specified cities.
+    Runs in background and returns immediately.
+    """
+    # Check if already syncing
+    status = airbtics.get_sync_status()
+    if status["status"] == "syncing":
+        raise HTTPException(
+            status_code=409,
+            detail="Sync already in progress"
+        )
+    
+    # Run sync in background
+    async def run_sync():
+        from .database import SessionLocal
+        db_session = SessionLocal()
+        try:
+            await airbtics.sync_all_cities(
+                db_session,
+                city_ids=request.city_ids,
+                force_refresh=request.force_refresh
+            )
+            # Invalidate caches after sync
+            analysis_cache.invalidate()
+            listings_cache.invalidate()
+        finally:
+            db_session.close()
+    
+    background_tasks.add_task(lambda: asyncio.create_task(run_sync()))
+    
+    return {
+        "message": "Sync started",
+        "city_ids": request.city_ids,
+        "force_refresh": request.force_refresh
+    }
+
+
+@app.post("/api/airbtics/sync/{city_id}")
+async def sync_airbtics_city(
+    city_id: int,
+    force_refresh: bool = Query(False),
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db)
+):
+    """Sync Airbtics data for a specific city"""
+    city = db.query(City).filter(City.id == city_id).first()
+    if not city:
+        raise HTTPException(status_code=404, detail="City not found")
+    
+    # Run sync directly (single city is fast enough)
+    result = await airbtics.sync_city_data(db, city, force_refresh)
+    
+    # Invalidate caches
+    analysis_cache.invalidate()
+    listings_cache.invalidate()
+    
+    return result
+
+
+@app.get("/api/airbtics/status", response_model=AirbticsSyncStatus)
+def get_airbtics_sync_status():
+    """Get current Airbtics sync status"""
+    status = airbtics.get_sync_status()
+    return AirbticsSyncStatus(
+        status=status["status"],
+        total_cities=status["total_cities"],
+        synced_cities=status["synced_cities"],
+        failed_cities=status["failed_cities"],
+        current_city=status["current_city"],
+        last_sync=status["last_sync"],
+        message=status["message"],
+        errors=status["errors"][:10]  # Limit errors returned
+    )
+
+
+@app.get("/api/airbtics/cities", response_model=List[AirbticsCityStatus])
+def get_airbtics_city_statuses(db: Session = Depends(get_db)):
+    """Get Airbtics data status for all cities"""
+    cities = db.query(City).all()
+    result = []
+    
+    cutoff_date = datetime.utcnow() - timedelta(days=airbtics.REFRESH_INTERVAL_DAYS)
+    
+    for city in cities:
+        # Get Airbtics data for this city
+        airbtics_entries = db.query(AirDNAData).filter(
+            AirDNAData.city_id == city.id,
+            AirDNAData.source == 'airbtics'
+        ).all()
+        
+        has_data = len(airbtics_entries) > 0
+        market_id = airbtics_entries[0].airbtics_market_id if airbtics_entries else None
+        last_fetch = max((e.last_api_fetch for e in airbtics_entries if e.last_api_fetch), default=None)
+        needs_refresh = not has_data or (last_fetch and last_fetch < cutoff_date)
+        
+        result.append(AirbticsCityStatus(
+            city_id=city.id,
+            city=city.city,
+            state=city.state,
+            zip_code=city.zip_code,
+            has_airbtics_data=has_data,
+            market_id=market_id,
+            last_fetch=last_fetch,
+            entries_count=len(airbtics_entries),
+            needs_refresh=needs_refresh
+        ))
+    
+    return result
+
+
 @app.get("/api/health")
 def health_check():
     """Health check endpoint."""
@@ -1467,15 +1587,20 @@ def health_check():
 # ==================== Auto-cleanup for old AirDNA data ====================
 
 def cleanup_old_airdna_data():
-    """Remove AirDNA data older than 1 year"""
+    """Remove AirDNA data older than 1 year (manual entries only - Airbtics refreshes)"""
     from .database import SessionLocal
     db = SessionLocal()
     try:
         one_year_ago = datetime.utcnow() - timedelta(days=365)
-        deleted = db.query(AirDNAData).filter(AirDNAData.created_at < one_year_ago).delete()
+        # Only delete manual entries older than 1 year
+        # Airbtics entries are refreshed every 6 months
+        deleted = db.query(AirDNAData).filter(
+            AirDNAData.created_at < one_year_ago,
+            AirDNAData.source == 'manual'
+        ).delete()
         db.commit()
         if deleted > 0:
-            logger.info(f"Cleaned up {deleted} AirDNA entries older than 1 year")
+            logger.info(f"Cleaned up {deleted} manual AirDNA entries older than 1 year")
     except Exception as e:
         logger.error(f"Error cleaning up old AirDNA data: {e}")
         db.rollback()
@@ -1484,9 +1609,13 @@ def cleanup_old_airdna_data():
 
 
 @app.on_event("startup")
-async def startup_cleanup():
-    """Run cleanup on startup"""
+async def startup_tasks():
+    """Run cleanup and Airbtics sync on startup"""
+    # Cleanup old manual data
     cleanup_old_airdna_data()
+    
+    # Start Airbtics sync in background for cities needing refresh
+    asyncio.create_task(airbtics.startup_sync())
 
 
 if __name__ == "__main__":

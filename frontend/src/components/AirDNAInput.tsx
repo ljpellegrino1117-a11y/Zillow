@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Save, DollarSign, Loader2, Trash2, Plus, Check, X, Minus, Upload, Camera, MessageSquare, Send, Image as ImageIcon, History, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
-import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, analyzeScreenshot, continueAIConversation, getSavedAIAnalyses, getAIAnalysisDetail, City, AirDNAData, AirDNAAmenities, SavedAIAnalysis } from '@/lib/api';
+import { Save, DollarSign, Loader2, Trash2, Plus, Check, X, Minus, Upload, Camera, MessageSquare, Send, Image as ImageIcon, History, ChevronDown, ChevronUp, Calendar, Zap, RefreshCw, Cloud, Database } from 'lucide-react';
+import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, analyzeScreenshot, continueAIConversation, getSavedAIAnalyses, getAIAnalysisDetail, syncAirbticsData, syncAirbticsCity, getAirbticsSyncStatus, getAirbticsCityStatuses, City, AirDNAData, AirDNAAmenities, SavedAIAnalysis, AirbticsSyncStatus, AirbticsCityStatus } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 
 interface Props {
@@ -66,6 +66,12 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
   
   // Delete confirmation state
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  
+  // Airbtics sync state
+  const [airbticsSyncStatus, setAirbticsSyncStatus] = useState<AirbticsSyncStatus | null>(null);
+  const [airbticsCityStatuses, setAirbticsCityStatuses] = useState<AirbticsCityStatus[]>([]);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncingCity, setSyncingCity] = useState<number | null>(null);
 
   // Fetch cities on mount and when refreshTrigger changes
   useEffect(() => {
@@ -102,6 +108,83 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
     };
     fetchAirDNAData();
   }, [selectedCity, selectedState]);
+
+  // Fetch Airbtics sync status on mount and poll while syncing
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const status = await getAirbticsSyncStatus();
+        setAirbticsSyncStatus(status);
+        
+        // Also fetch city statuses
+        const cityStatuses = await getAirbticsCityStatuses();
+        setAirbticsCityStatuses(cityStatuses);
+      } catch (error) {
+        console.error('Failed to fetch Airbtics status:', error);
+      }
+    };
+    
+    fetchStatus();
+    
+    // Poll while syncing
+    const interval = setInterval(() => {
+      if (syncingAll || airbticsSyncStatus?.status === 'syncing') {
+        fetchStatus();
+      }
+    }, 2000);
+    
+    return () => clearInterval(interval);
+  }, [syncingAll]);
+
+  // Airbtics sync handlers
+  const handleSyncAllCities = async () => {
+    setSyncingAll(true);
+    try {
+      await syncAirbticsData();
+      // Poll for status updates
+      const checkStatus = async () => {
+        const status = await getAirbticsSyncStatus();
+        setAirbticsSyncStatus(status);
+        if (status.status === 'syncing') {
+          setTimeout(checkStatus, 2000);
+        } else {
+          setSyncingAll(false);
+          // Refresh data
+          const data = await getAirDNAData(selectedCity, selectedState);
+          setExistingData(data);
+          const cityStatuses = await getAirbticsCityStatuses();
+          setAirbticsCityStatuses(cityStatuses);
+          onDataSaved?.();
+        }
+      };
+      checkStatus();
+    } catch (error) {
+      console.error('Failed to sync Airbtics data:', error);
+      setSyncingAll(false);
+    }
+  };
+
+  const handleSyncCity = async (cityId: number) => {
+    setSyncingCity(cityId);
+    try {
+      await syncAirbticsCity(cityId);
+      // Refresh data
+      const data = await getAirDNAData(selectedCity, selectedState);
+      setExistingData(data);
+      const cityStatuses = await getAirbticsCityStatuses();
+      setAirbticsCityStatuses(cityStatuses);
+      onDataSaved?.();
+    } catch (error) {
+      console.error('Failed to sync city:', error);
+    } finally {
+      setSyncingCity(null);
+    }
+  };
+
+  // Get current city's Airbtics status
+  const currentCityStatus = airbticsCityStatuses.find(
+    cs => cs.city === selectedCity && cs.state === selectedState
+  );
 
   const handleCitySelect = (value: string) => {
     const [city, state] = value.split('|');
@@ -383,27 +466,135 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
           <DollarSign className="h-5 w-5 text-green-600" />
-          AirDNA Revenue Data
+          Short-Term Rental Revenue Data
         </h2>
-        {existingData.length > 0 && (
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-            {existingData.length} saved entries
-          </span>
+        <div className="flex items-center gap-2">
+          {existingData.length > 0 && (
+            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+              {existingData.length} entries
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Airbtics Auto-Sync Section */}
+      <div className="mb-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg p-4 border border-blue-200">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+            <Cloud className="h-4 w-4" />
+            Airbtics API (Auto-Sync)
+          </h3>
+          <button
+            onClick={handleSyncAllCities}
+            disabled={syncingAll || airbticsSyncStatus?.status === 'syncing'}
+            className="btn btn-sm bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1"
+          >
+            {syncingAll || airbticsSyncStatus?.status === 'syncing' ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Syncing...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3 w-3" />
+                Sync All Cities
+              </>
+            )}
+          </button>
+        </div>
+        
+        <p className="text-xs text-blue-600 mb-3">
+          Revenue data is automatically fetched from Airbtics API for all bedroom counts (1-8) and refreshed every 6 months.
+        </p>
+
+        {/* Sync Status */}
+        {airbticsSyncStatus && airbticsSyncStatus.status === 'syncing' && (
+          <div className="bg-white rounded p-2 mb-3 border border-blue-100">
+            <div className="flex items-center gap-2 text-xs text-blue-700">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>{airbticsSyncStatus.message}</span>
+            </div>
+            <div className="mt-1 h-1.5 bg-blue-100 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-blue-600 transition-all duration-300"
+                style={{ 
+                  width: `${airbticsSyncStatus.total_cities > 0 
+                    ? (airbticsSyncStatus.synced_cities / airbticsSyncStatus.total_cities) * 100 
+                    : 0}%` 
+                }}
+              />
+            </div>
+            <div className="mt-1 text-xs text-blue-500">
+              {airbticsSyncStatus.synced_cities} / {airbticsSyncStatus.total_cities} cities
+            </div>
+          </div>
+        )}
+
+        {airbticsSyncStatus && airbticsSyncStatus.status === 'completed' && airbticsSyncStatus.last_sync && (
+          <div className="text-xs text-blue-600">
+            Last sync: {formatTimeAgo(airbticsSyncStatus.last_sync)}
+            {airbticsSyncStatus.failed_cities > 0 && (
+              <span className="text-orange-500 ml-2">
+                ({airbticsSyncStatus.failed_cities} cities failed)
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Current City Status */}
+        {currentCityStatus && (
+          <div className="mt-2 flex items-center justify-between bg-white rounded p-2 border border-blue-100">
+            <div className="text-xs">
+              <span className="text-gray-600">{currentCityStatus.city}, {currentCityStatus.state}:</span>
+              {currentCityStatus.has_airbtics_data ? (
+                <span className="ml-2 text-green-600">
+                  {currentCityStatus.entries_count} entries
+                  {currentCityStatus.last_fetch && (
+                    <span className="text-gray-400 ml-1">
+                      (fetched {formatTimeAgo(currentCityStatus.last_fetch)})
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="ml-2 text-orange-500">No data yet</span>
+              )}
+            </div>
+            {cities.find(c => c.city === selectedCity && c.state === selectedState) && (
+              <button
+                onClick={() => {
+                  const city = cities.find(c => c.city === selectedCity && c.state === selectedState);
+                  if (city) handleSyncCity(city.id);
+                }}
+                disabled={syncingCity !== null}
+                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+              >
+                {syncingCity ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3 w-3" />
+                )}
+                Refresh
+              </button>
+            )}
+          </div>
         )}
       </div>
 
-      <p className="text-sm text-gray-600 mb-4">
-        Add revenue data from AirDNA. Data is automatically saved and persists for 1 year.
-      </p>
-
-      {/* AI Screenshot Analysis Toggle */}
-      <div className="mb-4">
+      {/* Data Source Options */}
+      <div className="mb-4 grid grid-cols-2 gap-2">
         <button
           onClick={() => setShowAIAnalysis(!showAIAnalysis)}
-          className={`btn w-full justify-center ${showAIAnalysis ? 'btn-primary' : 'btn-secondary'}`}
+          className={`btn justify-center text-sm ${showAIAnalysis ? 'btn-primary' : 'btn-secondary'}`}
         >
           <Camera className="h-4 w-4" />
-          {showAIAnalysis ? 'Hide AI Screenshot Analysis' : 'Analyze AirDNA Screenshot with AI'}
+          Screenshot AI
+        </button>
+        <button
+          onClick={() => setShowAIAnalysis(false)}
+          className={`btn justify-center text-sm ${!showAIAnalysis ? 'btn-primary' : 'btn-secondary'}`}
+        >
+          <Database className="h-4 w-4" />
+          Manual Entry
         </button>
       </div>
 
@@ -876,13 +1067,37 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
               <div className="space-y-2">
                 {existingData.map(entry => {
                   const badges = getAmenityBadges(entry);
+                  const isAirbtics = entry.source === 'airbtics';
+                  const isScreenshot = entry.source === 'screenshot';
                   return (
                     <div 
                       key={entry.id} 
-                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200"
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        isAirbtics 
+                          ? 'bg-blue-50 border-blue-200' 
+                          : isScreenshot
+                            ? 'bg-purple-50 border-purple-200'
+                            : 'bg-gray-50 border-gray-200'
+                      }`}
                     >
-                      <div className="flex items-center gap-4">
-                        <div>
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          {/* Source badge */}
+                          {isAirbtics ? (
+                            <span className="text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded flex items-center gap-1">
+                              <Cloud className="h-3 w-3" />
+                              API
+                            </span>
+                          ) : isScreenshot ? (
+                            <span className="text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded flex items-center gap-1">
+                              <Camera className="h-3 w-3" />
+                              AI
+                            </span>
+                          ) : (
+                            <span className="text-xs bg-gray-500 text-white px-1.5 py-0.5 rounded">
+                              Manual
+                            </span>
+                          )}
                           <span className="font-medium text-gray-900">
                             {entry.bedrooms_min === entry.bedrooms_max 
                               ? `${entry.bedrooms_min} BR` 
@@ -890,7 +1105,7 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
                             }
                           </span>
                           {entry.zip_code && (
-                            <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                            <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
                               {entry.zip_code}
                             </span>
                           )}
@@ -901,6 +1116,16 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
                             ({formatCurrency(entry.average_annual_revenue / 12)}/mo)
                           </span>
                         </div>
+                        {/* Show percentiles for Airbtics data */}
+                        {isAirbtics && entry.revenue_p25 && (
+                          <div className="text-xs text-gray-500">
+                            <span title="25th percentile">p25: {formatCurrency(entry.revenue_p25)}</span>
+                            <span className="mx-1">|</span>
+                            <span title="75th percentile">p75: {formatCurrency(entry.revenue_p75 || 0)}</span>
+                            <span className="mx-1">|</span>
+                            <span title="90th percentile">p90: {formatCurrency(entry.revenue_p90 || 0)}</span>
+                          </div>
+                        )}
                         {badges.length > 0 && (
                           <div className="flex gap-1 flex-wrap">
                             {badges.map((badge, i) => (
