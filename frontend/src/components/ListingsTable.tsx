@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Building2, ExternalLink, Loader2, Filter } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Building2, ExternalLink, Loader2, Filter, Download } from 'lucide-react';
 import { getListings, getCities, getAmenityCounts, ZillowListing, City, AmenityFilters, AmenityCounts } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import AmenityFilter from './AmenityFilter';
+import AmenityFilter, { RequiredOptionalFilters } from './AmenityFilter';
 
 interface Props {
   refreshTrigger?: number;
@@ -25,7 +25,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
   const [selectedBedrooms, setSelectedBedrooms] = useState<number | undefined>(undefined);
   const [selectedListingType, setSelectedListingType] = useState<string>('');
   const [showCreativeOnly, setShowCreativeOnly] = useState(false);
-  const [amenityFilters, setAmenityFilters] = useState<AmenityFilters>({});
+  const [amenityFilters, setAmenityFilters] = useState<RequiredOptionalFilters>({ required: {}, optional: {} });
   const [amenityCounts, setAmenityCounts] = useState<AmenityCounts | null>(null);
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
@@ -46,6 +46,12 @@ export default function ListingsTable({ refreshTrigger }: Props) {
     const fetchListings = async () => {
       setLoading(true);
       try {
+        // Convert required filters to API format
+        const apiFilters: AmenityFilters = {};
+        Object.keys(amenityFilters.required || {}).forEach(key => {
+          (apiFilters as Record<string, boolean>)[key] = true;
+        });
+
         const data = await getListings(
           selectedCity || undefined,
           selectedState || undefined,
@@ -54,8 +60,8 @@ export default function ListingsTable({ refreshTrigger }: Props) {
           undefined,
           undefined,
           undefined,
-          amenityFilters,
-          100,
+          apiFilters,
+          500, // Get more listings for sorting
           0,
           selectedListingType || undefined,
           showCreativeOnly || undefined
@@ -68,7 +74,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
       }
     };
     fetchListings();
-  }, [selectedCity, selectedState, selectedBedrooms, amenityFilters, selectedListingType, showCreativeOnly, refreshTrigger]);
+  }, [selectedCity, selectedState, selectedBedrooms, amenityFilters.required, selectedListingType, showCreativeOnly, refreshTrigger]);
 
   useEffect(() => {
     const fetchCounts = async () => {
@@ -96,6 +102,39 @@ export default function ListingsTable({ refreshTrigger }: Props) {
       setSelectedState(state);
     }
   };
+
+  // Calculate optional amenity score for sorting
+  const calculateOptionalScore = useCallback((listing: ZillowListing): number => {
+    const optionalKeys = Object.keys(amenityFilters.optional || {});
+    if (optionalKeys.length === 0) return 0;
+    
+    let score = 0;
+    optionalKeys.forEach(key => {
+      if ((listing as any)[key]) {
+        score += 1;
+      }
+    });
+    return score;
+  }, [amenityFilters.optional]);
+
+  // Sort listings - optional amenities at top, then by price
+  const sortedListings = useMemo(() => {
+    const optionalKeys = Object.keys(amenityFilters.optional || {});
+    if (optionalKeys.length === 0) return listings;
+    
+    return [...listings].sort((a, b) => {
+      const scoreA = calculateOptionalScore(a);
+      const scoreB = calculateOptionalScore(b);
+      
+      // First sort by optional amenity score (descending)
+      if (scoreB !== scoreA) {
+        return scoreB - scoreA;
+      }
+      
+      // Then by price (ascending)
+      return (a.price || 0) - (b.price || 0);
+    });
+  }, [listings, amenityFilters.optional, calculateOptionalScore]);
 
   const getAmenityBadges = (listing: ZillowListing) => {
     const badges = [];
@@ -125,7 +164,118 @@ export default function ListingsTable({ refreshTrigger }: Props) {
     return badges;
   };
 
-  const activeFilterCount = Object.values(amenityFilters).filter(Boolean).length;
+  // Export functions
+  const exportToCSV = useCallback(() => {
+    const headers = [
+      'Type', 'Address', 'City', 'State', 'Zip', 'Bedrooms', 'Potential BR', 
+      'Bathrooms', 'Price/Mo', 'Sale Price', 'SqFt', 'Extra Rooms', 
+      'Pool', 'Waterfront', 'Basement', 'Garage', 'Creative Financing', 'URL'
+    ];
+    
+    const rows = sortedListings.map(l => [
+      l.listing_type,
+      l.address,
+      l.city,
+      l.state,
+      l.zip_code || '',
+      l.bedrooms,
+      l.potential_bedrooms || l.bedrooms,
+      l.bathrooms || '',
+      l.price || '',
+      l.sale_price || '',
+      l.sqft || '',
+      l.extra_rooms_count || 0,
+      l.has_pool ? 'Yes' : 'No',
+      l.has_waterfront ? 'Yes' : 'No',
+      l.has_basement ? 'Yes' : 'No',
+      l.has_garage ? 'Yes' : 'No',
+      l.has_creative_financing ? 'Yes' : 'No',
+      l.url || ''
+    ]);
+    
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `zillow-listings-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [sortedListings]);
+
+  const exportToPDF = useCallback(() => {
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Zillow Listings Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; font-size: 11px; }
+          h1 { color: #1f2937; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
+          table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+          th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+          th { background-color: #3b82f6; color: white; font-size: 10px; }
+          tr:nth-child(even) { background-color: #f9fafb; }
+          .rental { color: #16a34a; font-weight: bold; }
+          .for_sale { color: #9333ea; font-weight: bold; }
+          .creative { background-color: #fef3c7; }
+          .footer { margin-top: 20px; font-size: 10px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <h1>Zillow Listings</h1>
+        <p>Generated: ${new Date().toLocaleString()}</p>
+        <p>Total listings: ${sortedListings.length}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Address</th>
+              <th>BR</th>
+              <th>+Rooms</th>
+              <th>BA</th>
+              <th>Price</th>
+              <th>Amenities</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sortedListings.slice(0, 100).map(l => `
+              <tr class="${l.has_creative_financing ? 'creative' : ''}">
+                <td class="${l.listing_type}">${l.listing_type === 'for_sale' ? 'FOR SALE' : 'RENTAL'}</td>
+                <td>${l.address}<br/><small>${l.city}, ${l.state} ${l.zip_code || ''}</small></td>
+                <td>${l.bedrooms}</td>
+                <td>${l.extra_rooms_count > 0 ? '+' + l.extra_rooms_count : '-'}</td>
+                <td>${l.bathrooms || '-'}</td>
+                <td>${l.listing_type === 'for_sale' ? '$' + (l.sale_price || 0).toLocaleString() : '$' + (l.price || 0).toLocaleString() + '/mo'}</td>
+                <td>${[
+                  l.has_pool ? '🏊' : '',
+                  l.has_waterfront ? '🏖️' : '',
+                  l.has_basement ? '⬇️' : '',
+                  l.has_garage ? '🚗' : '',
+                ].filter(Boolean).join(' ')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        ${sortedListings.length > 100 ? '<p class="footer">Showing first 100 of ' + sortedListings.length + ' listings. Export to CSV for full list.</p>' : ''}
+      </body>
+      </html>
+    `;
+    
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.print();
+    }
+  }, [sortedListings]);
+
+  const requiredCount = Object.keys(amenityFilters.required || {}).length;
+  const optionalCount = Object.keys(amenityFilters.optional || {}).length;
+  const activeFilterCount = requiredCount + optionalCount;
 
   return (
     <div className="card">
@@ -214,11 +364,18 @@ export default function ListingsTable({ refreshTrigger }: Props) {
         )}
       </div>
 
+      {/* Optional amenities notice */}
+      {optionalCount > 0 && (
+        <div className="mb-4 p-2 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+          Listings with optional amenities are sorted to the top ({optionalCount} optional filter{optionalCount !== 1 ? 's' : ''} active)
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
         </div>
-      ) : listings.length === 0 ? (
+      ) : sortedListings.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
           <p>No listings found.</p>
           <p className="text-sm mt-1">Scrape a city to see listings here.</p>
@@ -241,115 +398,137 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {listings.map((listing) => (
-                  <tr key={listing.id}>
-                    <td>
-                      <div className="flex flex-col gap-1">
-                        {listing.listing_type === 'for_sale' ? (
-                          <span className="text-xs font-semibold bg-purple-100 text-purple-700 px-2 py-0.5 rounded w-fit">
-                            FOR SALE
-                          </span>
-                        ) : (
-                          <span className="text-xs font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded w-fit">
-                            RENTAL
-                          </span>
-                        )}
-                        {listing.has_creative_financing && (
-                          <span className="text-xs font-semibold bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded w-fit" title={listing.financing_keywords || 'Creative financing available'}>
-                            CREATIVE $
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="max-w-xs truncate font-medium" title={listing.address}>
-                        {listing.address}
-                      </div>
-                      {listing.city && (
-                        <div className="text-xs text-gray-500">
-                          {listing.city}, {listing.state} {listing.zip_code}
-                        </div>
-                      )}
-                    </td>
-                    <td className="font-medium">{listing.bedrooms}</td>
-                    <td>
-                      {listing.potential_bedrooms && listing.potential_bedrooms > listing.bedrooms ? (
-                        <span className="font-semibold text-blue-600" title={`+${listing.extra_rooms_count} extra rooms`}>
-                          {listing.potential_bedrooms}
-                          <span className="text-xs text-blue-400 ml-1">+{listing.extra_rooms_count}</span>
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">{listing.bedrooms}</span>
-                      )}
-                    </td>
-                    <td>{listing.bathrooms || '—'}</td>
-                    <td>
-                      {listing.listing_type === 'for_sale' ? (
-                        <div>
-                          <div className="font-semibold text-purple-600">
-                            {listing.sale_price ? formatCurrency(listing.sale_price) : '—'}
-                          </div>
-                          {listing.price && (
-                            <div className="text-xs text-gray-500">
-                              Est. rent: {formatCurrency(listing.price)}/mo
-                            </div>
+                {sortedListings.map((listing) => {
+                  const optionalScore = calculateOptionalScore(listing);
+                  return (
+                    <tr key={listing.id} className={optionalScore > 0 ? 'bg-yellow-50' : ''}>
+                      <td>
+                        <div className="flex flex-col gap-1">
+                          {listing.listing_type === 'for_sale' ? (
+                            <span className="text-xs font-semibold bg-purple-100 text-purple-700 px-2 py-0.5 rounded w-fit">
+                              FOR SALE
+                            </span>
+                          ) : (
+                            <span className="text-xs font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded w-fit">
+                              RENTAL
+                            </span>
+                          )}
+                          {listing.has_creative_financing && (
+                            <span className="text-xs font-semibold bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded w-fit" title={listing.financing_keywords || 'Creative financing available'}>
+                              CREATIVE $
+                            </span>
+                          )}
+                          {optionalScore > 0 && (
+                            <span className="text-xs font-semibold bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded w-fit">
+                              +{optionalScore} OPT
+                            </span>
                           )}
                         </div>
-                      ) : (
-                        <span className="font-semibold text-green-600">{formatCurrency(listing.price)}/mo</span>
-                      )}
-                    </td>
-                    <td>
-                      <div className="flex flex-wrap gap-1">
-                        {getExtraRoomBadges(listing).slice(0, 3).map((badge, i) => (
-                          <span key={i} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded" title={badge.label}>
-                            {badge.icon}
-                          </span>
-                        ))}
-                        {getExtraRoomBadges(listing).length > 3 && (
-                          <span className="text-xs text-blue-400">
-                            +{getExtraRoomBadges(listing).length - 3}
-                          </span>
+                      </td>
+                      <td>
+                        <div className="max-w-xs truncate font-medium" title={listing.address}>
+                          {listing.address}
+                        </div>
+                        {listing.city && (
+                          <div className="text-xs text-gray-500">
+                            {listing.city}, {listing.state} {listing.zip_code}
+                          </div>
                         )}
-                        {getExtraRoomBadges(listing).length === 0 && (
-                          <span className="text-xs text-gray-400">—</span>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="flex flex-wrap gap-1">
-                        {getAmenityBadges(listing).slice(0, 3).map((badge, i) => (
-                          <span key={i} className="text-xs bg-gray-100 px-1.5 py-0.5 rounded" title={badge.label}>
-                            {badge.icon}
+                      </td>
+                      <td className="font-medium">{listing.bedrooms}</td>
+                      <td>
+                        {listing.potential_bedrooms && listing.potential_bedrooms > listing.bedrooms ? (
+                          <span className="font-semibold text-blue-600" title={`+${listing.extra_rooms_count} extra rooms`}>
+                            {listing.potential_bedrooms}
+                            <span className="text-xs text-blue-400 ml-1">+{listing.extra_rooms_count}</span>
                           </span>
-                        ))}
-                        {getAmenityBadges(listing).length > 3 && (
-                          <span className="text-xs text-gray-400">
-                            +{getAmenityBadges(listing).length - 3}
-                          </span>
+                        ) : (
+                          <span className="text-gray-400">{listing.bedrooms}</span>
                         )}
-                      </div>
-                    </td>
-                    <td>
-                      {listing.url && (
-                        <a
-                          href={listing.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary-600 hover:text-primary-700"
-                        >
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>{listing.bathrooms || '—'}</td>
+                      <td>
+                        {listing.listing_type === 'for_sale' ? (
+                          <div>
+                            <div className="font-semibold text-purple-600">
+                              {listing.sale_price ? formatCurrency(listing.sale_price) : '—'}
+                            </div>
+                            {listing.price && (
+                              <div className="text-xs text-gray-500">
+                                Est. rent: {formatCurrency(listing.price)}/mo
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="font-semibold text-green-600">{formatCurrency(listing.price)}/mo</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="flex flex-wrap gap-1">
+                          {getExtraRoomBadges(listing).slice(0, 3).map((badge, i) => (
+                            <span key={i} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded" title={badge.label}>
+                              {badge.icon}
+                            </span>
+                          ))}
+                          {getExtraRoomBadges(listing).length > 3 && (
+                            <span className="text-xs text-blue-400">
+                              +{getExtraRoomBadges(listing).length - 3}
+                            </span>
+                          )}
+                          {getExtraRoomBadges(listing).length === 0 && (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="flex flex-wrap gap-1">
+                          {getAmenityBadges(listing).slice(0, 3).map((badge, i) => (
+                            <span key={i} className="text-xs bg-gray-100 px-1.5 py-0.5 rounded" title={badge.label}>
+                              {badge.icon}
+                            </span>
+                          ))}
+                          {getAmenityBadges(listing).length > 3 && (
+                            <span className="text-xs text-gray-400">
+                              +{getAmenityBadges(listing).length - 3}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        {listing.url && (
+                          <a
+                            href={listing.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary-600 hover:text-primary-700"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          <div className="mt-4 text-sm text-gray-500">
-            Showing {listings.length} listing{listings.length !== 1 ? 's' : ''}
-            {amenityCounts && ` of ${amenityCounts.total} total`}
+          
+          {/* Export buttons and summary */}
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-sm text-gray-500">
+              Showing {sortedListings.length} listing{sortedListings.length !== 1 ? 's' : ''}
+              {amenityCounts && ` of ${amenityCounts.total} total`}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={exportToCSV} className="btn-secondary text-sm">
+                <Download className="h-4 w-4" />
+                Export CSV
+              </button>
+              <button onClick={exportToPDF} className="btn-secondary text-sm">
+                <Download className="h-4 w-4" />
+                Export PDF
+              </button>
+            </div>
           </div>
         </>
       )}

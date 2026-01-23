@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -10,10 +10,10 @@ import {
   createColumnHelper,
   SortingState,
 } from '@tanstack/react-table';
-import { ArrowUpDown, ArrowUp, ArrowDown, TrendingUp, RefreshCw, Loader2, Filter } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, TrendingUp, RefreshCw, Loader2, Filter, Download } from 'lucide-react';
 import { getDiscrepancyAnalysis, getCities, DiscrepancyResult, City, AmenityFilters } from '@/lib/api';
 import { formatCurrency, formatPercent, cn } from '@/lib/utils';
-import AmenityFilter from './AmenityFilter';
+import AmenityFilter, { RequiredOptionalFilters } from './AmenityFilter';
 
 interface Props {
   refreshTrigger?: number;
@@ -29,10 +29,10 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [selectedState, setSelectedState] = useState<string>('');
   const [selectedBedrooms, setSelectedBedrooms] = useState<number | undefined>(undefined);
-  const [amenityFilters, setAmenityFilters] = useState<AmenityFilters>({});
+  const [amenityFilters, setAmenityFilters] = useState<RequiredOptionalFilters>({ required: {}, optional: {} });
   const [showFilters, setShowFilters] = useState(false);
   const [sorting, setSorting] = useState<SortingState>([
-    { id: 'annual_profit_vs_bottom', desc: true },
+    { id: 'airdna_to_rent_ratio', desc: true }, // Default sort by AirDNA to rent ratio
   ]);
 
   useEffect(() => {
@@ -50,15 +50,30 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
   const fetchData = async () => {
     setLoading(true);
     try {
+      // Convert required filters to API format
+      const apiFilters: AmenityFilters = {};
+      Object.keys(amenityFilters.required || {}).forEach(key => {
+        (apiFilters as Record<string, boolean>)[key] = true;
+      });
+
       const results = await getDiscrepancyAnalysis(
         selectedCity || undefined,
         selectedState || undefined,
         selectedBedrooms,
         3,
         8,
-        amenityFilters
+        apiFilters
       );
-      setData(results);
+      
+      // Add calculated ratio field
+      const enrichedResults = results.map(r => ({
+        ...r,
+        airdna_to_rent_ratio: r.bottom_10_avg_rental_price > 0 
+          ? r.airdna_monthly_revenue / r.bottom_10_avg_rental_price 
+          : 0,
+      }));
+      
+      setData(enrichedResults);
     } catch (error) {
       console.error('Failed to fetch discrepancy data:', error);
     } finally {
@@ -68,7 +83,7 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
 
   useEffect(() => {
     fetchData();
-  }, [refreshTrigger, selectedCity, selectedState, selectedBedrooms, amenityFilters]);
+  }, [refreshTrigger, selectedCity, selectedState, selectedBedrooms, amenityFilters.required]);
 
   const handleCitySelect = (value: string) => {
     if (!value) {
@@ -80,6 +95,116 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
       setSelectedState(state);
     }
   };
+
+  // Export functions
+  const exportToCSV = useCallback(() => {
+    const headers = [
+      'City', 'State', 'Bedrooms', 'AirDNA Annual', 'AirDNA Monthly', 
+      'Avg Rent/Mo', 'Bottom 10% Rent/Mo', 'Listings', 
+      'Annual Profit vs Avg', 'Annual Profit vs Bottom', 'ROI %', 'AirDNA/Rent Ratio'
+    ];
+    
+    const rows = data.map(r => [
+      r.city,
+      r.state,
+      r.bedrooms,
+      r.airdna_annual_revenue,
+      r.airdna_monthly_revenue,
+      r.avg_rental_price,
+      r.bottom_10_avg_rental_price,
+      r.listing_count,
+      r.annual_profit_vs_avg,
+      r.annual_profit_vs_bottom,
+      (r.roi_vs_bottom * 100).toFixed(1),
+      ((r as any).airdna_to_rent_ratio || 0).toFixed(2)
+    ]);
+    
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `arbitrage-opportunities-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [data]);
+
+  const exportToPDF = useCallback(() => {
+    // Create a printable HTML document
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Arbitrage Opportunities Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          h1 { color: #1f2937; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
+          table { border-collapse: collapse; width: 100%; margin-top: 20px; font-size: 12px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #3b82f6; color: white; }
+          tr:nth-child(even) { background-color: #f9fafb; }
+          .positive { color: #16a34a; font-weight: bold; }
+          .negative { color: #dc2626; }
+          .highlight { background-color: #dcfce7 !important; }
+          .footer { margin-top: 20px; font-size: 10px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <h1>Rental Arbitrage Opportunities</h1>
+        <p>Generated: ${new Date().toLocaleString()}</p>
+        <p>Sorted by: AirDNA to Rent Ratio (Highest First)</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Location</th>
+              <th>BR</th>
+              <th>AirDNA Annual</th>
+              <th>AirDNA/Mo</th>
+              <th>Avg Rent</th>
+              <th>Bottom 10%</th>
+              <th>Profit vs Bottom</th>
+              <th>ROI</th>
+              <th>Ratio</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.map(r => `
+              <tr class="${r.annual_profit_vs_bottom > 20000 ? 'highlight' : ''}">
+                <td>${r.city}, ${r.state}</td>
+                <td>${r.bedrooms}</td>
+                <td>$${r.airdna_annual_revenue.toLocaleString()}</td>
+                <td>$${r.airdna_monthly_revenue.toLocaleString()}</td>
+                <td>$${r.avg_rental_price.toLocaleString()}</td>
+                <td>$${r.bottom_10_avg_rental_price.toLocaleString()}</td>
+                <td class="${r.annual_profit_vs_bottom > 0 ? 'positive' : 'negative'}">
+                  ${r.annual_profit_vs_bottom > 0 ? '+' : ''}$${r.annual_profit_vs_bottom.toLocaleString()}
+                </td>
+                <td class="${r.roi_vs_bottom > 0 ? 'positive' : 'negative'}">
+                  ${(r.roi_vs_bottom * 100).toFixed(1)}%
+                </td>
+                <td>${((r as any).airdna_to_rent_ratio || 0).toFixed(2)}x</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div class="footer">
+          <p>Total opportunities: ${data.length}</p>
+          <p>Green highlighted rows have profit > $20,000/year</p>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.print();
+    }
+  }, [data]);
 
   const columns = useMemo(() => [
     columnHelper.accessor(row => `${row.city}, ${row.state}`, {
@@ -104,19 +229,8 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
         </div>
       ),
     }),
-    columnHelper.accessor('avg_rental_price', {
-      header: 'Avg Rent',
-      cell: info => (
-        <div>
-          <span>{formatCurrency(info.getValue())}/mo</span>
-          <div className="text-xs text-gray-500">
-            {formatCurrency(info.getValue() * 12)}/yr
-          </div>
-        </div>
-      ),
-    }),
     columnHelper.accessor('bottom_10_avg_rental_price', {
-      header: 'Bottom 10%',
+      header: 'Bottom 10% Rent',
       cell: info => (
         <div>
           <span className="text-blue-600">{formatCurrency(info.getValue())}/mo</span>
@@ -126,23 +240,27 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
         </div>
       ),
     }),
-    columnHelper.accessor('listing_count', {
-      header: 'Listings',
-      cell: info => info.getValue(),
-    }),
-    columnHelper.accessor('annual_profit_vs_avg', {
-      header: 'Profit vs Avg',
+    columnHelper.accessor((row: any) => row.airdna_to_rent_ratio || 0, {
+      id: 'airdna_to_rent_ratio',
+      header: 'AirDNA/Rent Ratio',
       cell: info => {
         const value = info.getValue();
         return (
-          <span className={cn('font-medium', value > 0 ? 'text-green-600' : 'text-red-600')}>
-            {value > 0 ? '+' : ''}{formatCurrency(value)}
+          <span className={cn(
+            'font-bold text-lg',
+            value >= 2 ? 'text-green-600' : value >= 1.5 ? 'text-yellow-600' : 'text-red-600'
+          )}>
+            {value.toFixed(2)}x
           </span>
         );
       },
     }),
+    columnHelper.accessor('listing_count', {
+      header: 'Listings',
+      cell: info => info.getValue(),
+    }),
     columnHelper.accessor('annual_profit_vs_bottom', {
-      header: 'Profit vs Bottom',
+      header: 'Annual Profit',
       cell: info => {
         const value = info.getValue();
         return (
@@ -175,7 +293,9 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
     getFilteredRowModel: getFilteredRowModel(),
   });
 
-  const activeFilterCount = Object.values(amenityFilters).filter(Boolean).length;
+  const requiredCount = Object.keys(amenityFilters.required || {}).length;
+  const optionalCount = Object.keys(amenityFilters.optional || {}).length;
+  const activeFilterCount = requiredCount + optionalCount;
 
   if (loading && data.length === 0) {
     return (
@@ -194,10 +314,12 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
           <TrendingUp className="h-5 w-5 text-primary-600" />
           Arbitrage Opportunities
         </h2>
-        <button onClick={fetchData} className="btn-secondary text-sm" disabled={loading}>
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          <button onClick={fetchData} className="btn-secondary text-sm" disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -263,9 +385,9 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
       ) : (
         <>
           <p className="text-sm text-gray-600 mb-4">
-            Click column headers to sort. 
-            <span className="font-medium text-green-600"> Green = profitable</span>, 
-            <span className="font-medium text-red-600"> Red = not profitable</span>.
+            Auto-sorted by <span className="font-semibold">AirDNA to Rent Ratio</span> (highest first).
+            Click column headers to change sort. 
+            <span className="font-medium text-green-600"> Green = profitable</span>.
           </p>
 
           <div className="table-container">
@@ -316,8 +438,21 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
             </table>
           </div>
 
-          <div className="mt-4 text-sm text-gray-500">
-            Showing {data.length} result{data.length !== 1 ? 's' : ''}
+          {/* Export buttons and summary */}
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-sm text-gray-500">
+              Showing {data.length} result{data.length !== 1 ? 's' : ''}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={exportToCSV} className="btn-secondary text-sm">
+                <Download className="h-4 w-4" />
+                Export CSV
+              </button>
+              <button onClick={exportToPDF} className="btn-secondary text-sm">
+                <Download className="h-4 w-4" />
+                Export PDF
+              </button>
+            </div>
           </div>
         </>
       )}
