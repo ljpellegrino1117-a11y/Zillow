@@ -79,6 +79,23 @@ class ZillowListingResponse(ZillowListingBase):
     has_balcony: bool = False
     has_gym: bool = False
     has_pet_friendly: bool = False
+    # Extra rooms that could be bedrooms
+    extra_rooms_count: int = 0
+    extra_rooms_details: Optional[str] = None
+    potential_bedrooms: Optional[int] = None
+    has_office: bool = False
+    has_den: bool = False
+    has_bonus_room: bool = False
+    has_loft: bool = False
+    has_flex_space: bool = False
+    has_sunroom: bool = False
+    has_media_room: bool = False
+    has_game_room: bool = False
+    has_guest_room: bool = False
+    has_nursery: bool = False
+    has_studio: bool = False
+    has_attic: bool = False
+    has_mother_in_law: bool = False
     scraped_at: datetime
 
     class Config:

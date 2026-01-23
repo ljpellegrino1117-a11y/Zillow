@@ -90,6 +90,113 @@ AMENITY_PATTERNS = {
     ],
 }
 
+# Extra rooms that could potentially be used as bedrooms
+# Each pattern maps to a room type and whether it counts as a potential bedroom
+EXTRA_ROOM_PATTERNS = {
+    'has_office': {
+        'patterns': [
+            r'\boffice\b', r'\bhome\s*office\b', r'\bwork\s*from\s*home\b',
+            r'\bwfh\s*space\b', r'\bremote\s*work\b'
+        ],
+        'label': 'Office',
+        'counts_as_bedroom': True
+    },
+    'has_den': {
+        'patterns': [
+            r'\bden\b', r'\bstudy\b', r'\blibrary\b', r'\breading\s*room\b'
+        ],
+        'label': 'Den/Study',
+        'counts_as_bedroom': True
+    },
+    'has_bonus_room': {
+        'patterns': [
+            r'\bbonus\s*room\b', r'\bbonus\s*space\b', r'\bextra\s*room\b',
+            r'\badditional\s*room\b', r'\bspare\s*room\b'
+        ],
+        'label': 'Bonus Room',
+        'counts_as_bedroom': True
+    },
+    'has_loft': {
+        'patterns': [
+            r'\bloft\b', r'\bloft\s*space\b', r'\bloft\s*area\b'
+        ],
+        'label': 'Loft',
+        'counts_as_bedroom': True
+    },
+    'has_flex_space': {
+        'patterns': [
+            r'\bflex\s*space\b', r'\bflex\s*room\b', r'\bmulti-?purpose\b',
+            r'\bversatile\s*space\b', r'\bconvertible\b'
+        ],
+        'label': 'Flex Space',
+        'counts_as_bedroom': True
+    },
+    'has_sunroom': {
+        'patterns': [
+            r'\bsunroom\b', r'\bsun\s*room\b', r'\bsolarium\b', 
+            r'\bflorida\s*room\b', r'\bconservatory\b', r'\benclosed\s*porch\b'
+        ],
+        'label': 'Sunroom',
+        'counts_as_bedroom': True
+    },
+    'has_media_room': {
+        'patterns': [
+            r'\bmedia\s*room\b', r'\btheater\s*room\b', r'\btheatre\s*room\b',
+            r'\bhome\s*theater\b', r'\bmovie\s*room\b', r'\bscreening\s*room\b'
+        ],
+        'label': 'Media Room',
+        'counts_as_bedroom': True
+    },
+    'has_game_room': {
+        'patterns': [
+            r'\bgame\s*room\b', r'\brec\s*room\b', r'\brecreation\s*room\b',
+            r'\bplay\s*room\b', r'\bplayroom\b', r'\bentertainment\s*room\b'
+        ],
+        'label': 'Game/Rec Room',
+        'counts_as_bedroom': True
+    },
+    'has_guest_room': {
+        'patterns': [
+            r'\bguest\s*room\b', r'\bguest\s*suite\b', r'\bguest\s*quarters\b'
+        ],
+        'label': 'Guest Room',
+        'counts_as_bedroom': False  # Already counted as bedroom usually
+    },
+    'has_nursery': {
+        'patterns': [
+            r'\bnursery\b', r'\bbaby\s*room\b', r"\bchild(?:ren)?'?s?\s*room\b"
+        ],
+        'label': 'Nursery',
+        'counts_as_bedroom': False  # Already counted as bedroom usually
+    },
+    'has_studio': {
+        'patterns': [
+            r'\bstudio\s*space\b', r'\bart\s*studio\b', r'\bmusic\s*studio\b',
+            r'\bcraft\s*room\b', r'\bhobby\s*room\b'
+        ],
+        'label': 'Studio/Hobby Room',
+        'counts_as_bedroom': True
+    },
+    'has_attic': {
+        'patterns': [
+            r'\bfinished\s*attic\b', r'\battic\s*space\b', r'\battic\s*room\b',
+            r'\bconverted\s*attic\b', r'\busable\s*attic\b'
+        ],
+        'label': 'Finished Attic',
+        'counts_as_bedroom': True
+    },
+    'has_mother_in_law': {
+        'patterns': [
+            r'\bmother[\s-]?in[\s-]?law\b', r'\bin[\s-]?law\s*suite\b',
+            r'\bguest\s*house\b', r'\bgranny\s*flat\b', r'\badu\b',
+            r'\baccessory\s*dwelling\b', r'\bseparate\s*living\b',
+            r'\bcarriage\s*house\b', r'\bpool\s*house\b'
+        ],
+        'label': 'In-Law Suite/ADU',
+        'counts_as_bedroom': True
+    },
+}
+
 
 def detect_amenities(description: str, amenities_list: List[str] = None) -> Dict[str, bool]:
     """
@@ -127,6 +234,54 @@ def detect_amenities(description: str, amenities_list: List[str] = None) -> Dict
         # If finished patterns found, mark finished
         # has_basement stays true either way
         pass
+    
+    return results
+
+
+def detect_extra_rooms(description: str, amenities_list: List[str] = None, bedrooms: int = 0) -> Dict[str, Any]:
+    """
+    Detect extra rooms that could potentially be used as bedrooms.
+    Scans description and amenities for office, den, loft, bonus room, etc.
+    
+    Args:
+        description: Property description text
+        amenities_list: List of amenities from the listing
+        bedrooms: Listed bedroom count
+        
+    Returns:
+        Dict with extra room flags, count, and potential bedrooms
+    """
+    # Combine description and amenities into one searchable text
+    text_parts = []
+    if description:
+        text_parts.append(description)
+    if amenities_list:
+        text_parts.extend(amenities_list)
+    
+    combined_text = ' '.join(text_parts).lower()
+    
+    results = {}
+    extra_rooms_found = []
+    extra_bedroom_count = 0
+    
+    for room_key, room_config in EXTRA_ROOM_PATTERNS.items():
+        found = False
+        for pattern in room_config['patterns']:
+            if re.search(pattern, combined_text, re.IGNORECASE):
+                found = True
+                break
+        
+        results[room_key] = found
+        
+        if found:
+            extra_rooms_found.append(room_config['label'])
+            if room_config['counts_as_bedroom']:
+                extra_bedroom_count += 1
+    
+    # Add summary fields
+    results['extra_rooms_count'] = extra_bedroom_count
+    results['extra_rooms_details'] = json.dumps(extra_rooms_found) if extra_rooms_found else None
+    results['potential_bedrooms'] = bedrooms + extra_bedroom_count
     
     return results
 
@@ -392,13 +547,17 @@ class ZillowScraperAPI:
             # Detect amenities
             detected = detect_amenities(desc, amenities_list)
             
+            # Detect extra rooms that could be used as bedrooms
+            bedroom_count = int(beds) if beds else 0
+            extra_rooms = detect_extra_rooms(desc, amenities_list, bedroom_count)
+            
             listing = {
                 'zillow_id': str(zpid),
                 'address': address.strip(),
                 'city': city.strip() if city else search_city,
                 'state': state.strip() if state else search_state,
                 'zip_code': zip_code.strip() if zip_code else None,
-                'bedrooms': int(beds) if beds else 0,
+                'bedrooms': bedroom_count,
                 'bathrooms': float(baths) if baths else None,
                 'price': price,
                 'description': desc,
@@ -408,8 +567,9 @@ class ZillowScraperAPI:
                 'amenities_raw': json.dumps(amenities_list) if amenities_list else None,
             }
             
-            # Add detected amenities
+            # Add detected amenities and extra rooms
             listing.update(detected)
+            listing.update(extra_rooms)
             
             return listing
         except Exception as e:
@@ -464,6 +624,7 @@ class ZillowScraperAPI:
                 if address and price:
                     # Basic amenity detection from card text
                     detected = detect_amenities(card_text, [])
+                    extra_rooms = detect_extra_rooms(card_text, [], beds)
                     
                     listing = {
                         'zillow_id': zpid or f"html_{hash(address) % 10000000}",
@@ -481,6 +642,7 @@ class ZillowScraperAPI:
                         'amenities_raw': None,
                     }
                     listing.update(detected)
+                    listing.update(extra_rooms)
                     listings.append(listing)
             except Exception as e:
                 logger.error(f"Error parsing card: {e}")

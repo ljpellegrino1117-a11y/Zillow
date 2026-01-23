@@ -145,6 +145,23 @@ async def run_scrape_job(city: str, state: str, min_bedrooms: int, max_bedrooms:
                     has_balcony=listing_data.get('has_balcony', False),
                     has_gym=listing_data.get('has_gym', False),
                     has_pet_friendly=listing_data.get('has_pet_friendly', False),
+                    # Extra rooms that could be bedrooms
+                    extra_rooms_count=listing_data.get('extra_rooms_count', 0),
+                    extra_rooms_details=listing_data.get('extra_rooms_details'),
+                    potential_bedrooms=listing_data.get('potential_bedrooms'),
+                    has_office=listing_data.get('has_office', False),
+                    has_den=listing_data.get('has_den', False),
+                    has_bonus_room=listing_data.get('has_bonus_room', False),
+                    has_loft=listing_data.get('has_loft', False),
+                    has_flex_space=listing_data.get('has_flex_space', False),
+                    has_sunroom=listing_data.get('has_sunroom', False),
+                    has_media_room=listing_data.get('has_media_room', False),
+                    has_game_room=listing_data.get('has_game_room', False),
+                    has_guest_room=listing_data.get('has_guest_room', False),
+                    has_nursery=listing_data.get('has_nursery', False),
+                    has_studio=listing_data.get('has_studio', False),
+                    has_attic=listing_data.get('has_attic', False),
+                    has_mother_in_law=listing_data.get('has_mother_in_law', False),
                 )
                 db.add(listing)
             
@@ -251,6 +268,18 @@ def get_listings(
     has_balcony: Optional[bool] = None,
     has_gym: Optional[bool] = None,
     has_pet_friendly: Optional[bool] = None,
+    # Extra room filters
+    has_office: Optional[bool] = None,
+    has_den: Optional[bool] = None,
+    has_bonus_room: Optional[bool] = None,
+    has_loft: Optional[bool] = None,
+    has_flex_space: Optional[bool] = None,
+    has_sunroom: Optional[bool] = None,
+    has_media_room: Optional[bool] = None,
+    has_game_room: Optional[bool] = None,
+    has_studio: Optional[bool] = None,
+    has_attic: Optional[bool] = None,
+    has_mother_in_law: Optional[bool] = None,
     limit: int = 100,
     offset: int = 0,
     db: Session = Depends(get_db)
@@ -317,6 +346,30 @@ def get_listings(
     if has_pet_friendly is True:
         query = query.filter(ZillowListing.has_pet_friendly == True)
     
+    # Extra room filters
+    if has_office is True:
+        query = query.filter(ZillowListing.has_office == True)
+    if has_den is True:
+        query = query.filter(ZillowListing.has_den == True)
+    if has_bonus_room is True:
+        query = query.filter(ZillowListing.has_bonus_room == True)
+    if has_loft is True:
+        query = query.filter(ZillowListing.has_loft == True)
+    if has_flex_space is True:
+        query = query.filter(ZillowListing.has_flex_space == True)
+    if has_sunroom is True:
+        query = query.filter(ZillowListing.has_sunroom == True)
+    if has_media_room is True:
+        query = query.filter(ZillowListing.has_media_room == True)
+    if has_game_room is True:
+        query = query.filter(ZillowListing.has_game_room == True)
+    if has_studio is True:
+        query = query.filter(ZillowListing.has_studio == True)
+    if has_attic is True:
+        query = query.filter(ZillowListing.has_attic == True)
+    if has_mother_in_law is True:
+        query = query.filter(ZillowListing.has_mother_in_law == True)
+    
     return query.order_by(ZillowListing.price).offset(offset).limit(limit).all()
 
 
@@ -376,7 +429,7 @@ def get_amenity_counts(
     bedrooms: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get counts of listings with each amenity."""
+    """Get counts of listings with each amenity and extra room type."""
     query = db.query(ZillowListing)
     
     if city and state:
@@ -394,6 +447,7 @@ def get_amenity_counts(
     
     return {
         "total": total,
+        # Amenities
         "has_pool": query.filter(ZillowListing.has_pool == True).count(),
         "has_waterview": query.filter(ZillowListing.has_waterview == True).count(),
         "has_waterfront": query.filter(ZillowListing.has_waterfront == True).count(),
@@ -410,6 +464,20 @@ def get_amenity_counts(
         "has_balcony": query.filter(ZillowListing.has_balcony == True).count(),
         "has_gym": query.filter(ZillowListing.has_gym == True).count(),
         "has_pet_friendly": query.filter(ZillowListing.has_pet_friendly == True).count(),
+        # Extra rooms (potential bedrooms)
+        "has_office": query.filter(ZillowListing.has_office == True).count(),
+        "has_den": query.filter(ZillowListing.has_den == True).count(),
+        "has_bonus_room": query.filter(ZillowListing.has_bonus_room == True).count(),
+        "has_loft": query.filter(ZillowListing.has_loft == True).count(),
+        "has_flex_space": query.filter(ZillowListing.has_flex_space == True).count(),
+        "has_sunroom": query.filter(ZillowListing.has_sunroom == True).count(),
+        "has_media_room": query.filter(ZillowListing.has_media_room == True).count(),
+        "has_game_room": query.filter(ZillowListing.has_game_room == True).count(),
+        "has_guest_room": query.filter(ZillowListing.has_guest_room == True).count(),
+        "has_nursery": query.filter(ZillowListing.has_nursery == True).count(),
+        "has_studio": query.filter(ZillowListing.has_studio == True).count(),
+        "has_attic": query.filter(ZillowListing.has_attic == True).count(),
+        "has_mother_in_law": query.filter(ZillowListing.has_mother_in_law == True).count(),
     }
 
 

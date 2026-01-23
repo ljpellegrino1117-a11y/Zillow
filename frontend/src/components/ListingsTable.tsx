@@ -99,6 +99,22 @@ export default function ListingsTable({ refreshTrigger }: Props) {
     return badges;
   };
 
+  const getExtraRoomBadges = (listing: ZillowListing) => {
+    const badges = [];
+    if (listing.has_office) badges.push({ label: 'Office', icon: '💼' });
+    if (listing.has_den) badges.push({ label: 'Den', icon: '📚' });
+    if (listing.has_bonus_room) badges.push({ label: 'Bonus', icon: '➕' });
+    if (listing.has_loft) badges.push({ label: 'Loft', icon: '🏠' });
+    if (listing.has_flex_space) badges.push({ label: 'Flex', icon: '🔄' });
+    if (listing.has_sunroom) badges.push({ label: 'Sunroom', icon: '☀️' });
+    if (listing.has_media_room) badges.push({ label: 'Media', icon: '🎬' });
+    if (listing.has_game_room) badges.push({ label: 'Game', icon: '🎮' });
+    if (listing.has_studio) badges.push({ label: 'Studio', icon: '🎨' });
+    if (listing.has_attic) badges.push({ label: 'Attic', icon: '🏚️' });
+    if (listing.has_mother_in_law) badges.push({ label: 'In-Law', icon: '🏘️' });
+    return badges;
+  };
+
   const activeFilterCount = Object.values(amenityFilters).filter(Boolean).length;
 
   return (
@@ -182,10 +198,11 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                 <tr>
                   <th>Address</th>
                   <th>BR</th>
+                  <th>Potential BR</th>
                   <th>BA</th>
                   <th>Price</th>
+                  <th>Extra Rooms</th>
                   <th>Amenities</th>
-                  <th>SqFt</th>
                   <th></th>
                 </tr>
               </thead>
@@ -203,8 +220,35 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                       )}
                     </td>
                     <td className="font-medium">{listing.bedrooms}</td>
+                    <td>
+                      {listing.potential_bedrooms && listing.potential_bedrooms > listing.bedrooms ? (
+                        <span className="font-semibold text-blue-600" title={`+${listing.extra_rooms_count} extra rooms`}>
+                          {listing.potential_bedrooms}
+                          <span className="text-xs text-blue-400 ml-1">+{listing.extra_rooms_count}</span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">{listing.bedrooms}</span>
+                      )}
+                    </td>
                     <td>{listing.bathrooms || '—'}</td>
                     <td className="font-semibold text-green-600">{formatCurrency(listing.price)}/mo</td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        {getExtraRoomBadges(listing).slice(0, 3).map((badge, i) => (
+                          <span key={i} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded" title={badge.label}>
+                            {badge.icon}
+                          </span>
+                        ))}
+                        {getExtraRoomBadges(listing).length > 3 && (
+                          <span className="text-xs text-blue-400">
+                            +{getExtraRoomBadges(listing).length - 3}
+                          </span>
+                        )}
+                        {getExtraRoomBadges(listing).length === 0 && (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <div className="flex flex-wrap gap-1">
                         {getAmenityBadges(listing).slice(0, 3).map((badge, i) => (
@@ -218,9 +262,6 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                           </span>
                         )}
                       </div>
-                    </td>
-                    <td className="text-gray-600">
-                      {listing.sqft ? listing.sqft.toLocaleString() : '—'}
                     </td>
                     <td>
                       {listing.url && (

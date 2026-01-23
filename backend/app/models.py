@@ -60,6 +60,26 @@ class ZillowListing(Base):
     has_gym = Column(Boolean, default=False, index=True)
     has_pet_friendly = Column(Boolean, default=False, index=True)
     
+    # Extra rooms that could be used as bedrooms
+    extra_rooms_count = Column(Integer, default=0)  # Number of extra rooms detected
+    extra_rooms_details = Column(Text)  # JSON list of detected room types
+    potential_bedrooms = Column(Integer)  # bedrooms + extra_rooms_count
+    
+    # Specific extra room types detected
+    has_office = Column(Boolean, default=False)
+    has_den = Column(Boolean, default=False)
+    has_bonus_room = Column(Boolean, default=False)
+    has_loft = Column(Boolean, default=False)
+    has_flex_space = Column(Boolean, default=False)
+    has_sunroom = Column(Boolean, default=False)
+    has_media_room = Column(Boolean, default=False)
+    has_game_room = Column(Boolean, default=False)
+    has_guest_room = Column(Boolean, default=False)
+    has_nursery = Column(Boolean, default=False)
+    has_studio = Column(Boolean, default=False)
+    has_attic = Column(Boolean, default=False)
+    has_mother_in_law = Column(Boolean, default=False)  # Mother-in-law suite/apartment
+    
     scraped_at = Column(DateTime, default=datetime.utcnow)
 
     city_rel = relationship("City", back_populates="listings")

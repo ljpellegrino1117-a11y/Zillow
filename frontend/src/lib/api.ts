@@ -42,6 +42,23 @@ export interface ZillowListing {
   has_balcony: boolean;
   has_gym: boolean;
   has_pet_friendly: boolean;
+  // Extra rooms that could be bedrooms
+  extra_rooms_count: number;
+  extra_rooms_details: string | null;
+  potential_bedrooms: number | null;
+  has_office: boolean;
+  has_den: boolean;
+  has_bonus_room: boolean;
+  has_loft: boolean;
+  has_flex_space: boolean;
+  has_sunroom: boolean;
+  has_media_room: boolean;
+  has_game_room: boolean;
+  has_guest_room: boolean;
+  has_nursery: boolean;
+  has_studio: boolean;
+  has_attic: boolean;
+  has_mother_in_law: boolean;
   scraped_at: string;
 }
 
