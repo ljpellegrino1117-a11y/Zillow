@@ -389,7 +389,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
           <AmenityFilter
             filters={amenityFilters}
             onChange={setAmenityFilters}
-            counts={amenityCounts || undefined}
+            counts={amenityCounts ? (amenityCounts as unknown as Record<string, number>) : undefined}
           />
         )}
       </div>

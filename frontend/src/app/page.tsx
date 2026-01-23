@@ -44,13 +44,13 @@ export default function Dashboard() {
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <div className="bg-primary-600 p-2 rounded-lg">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="bg-primary-600 p-2 rounded-lg flex-shrink-0">
                 <Home className="h-6 w-6 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">Zillow Arbitrage</h1>
-                <p className="text-xs text-gray-500">Find rental arbitrage opportunities</p>
+              <div className="min-w-0">
+                <h1 className="text-xl font-bold text-gray-900 truncate">Zillow Arbitrage</h1>
+                <p className="text-xs text-gray-500 truncate">Find rental arbitrage opportunities</p>
               </div>
             </div>
             <div className="flex items-center gap-4">
