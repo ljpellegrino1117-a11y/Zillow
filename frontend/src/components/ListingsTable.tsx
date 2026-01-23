@@ -17,7 +17,7 @@ const LISTING_TYPE_OPTIONS = [
   { value: 'for_sale', label: 'For Sale Only' },
 ];
 
-// Debounce hook for performance
+// Debounce hook for performance - shorter delay for snappier feel
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
 
@@ -32,6 +32,9 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
+// Page size for pagination
+const PAGE_SIZE = 50;
+
 export default function ListingsTable({ refreshTrigger }: Props) {
   const [listings, setListings] = useState<ZillowListing[]>([]);
   const [cities, setCities] = useState<City[]>([]);
@@ -44,9 +47,11 @@ export default function ListingsTable({ refreshTrigger }: Props) {
   const [amenityCounts, setAmenityCounts] = useState<AmenityCounts | null>(null);
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   
-  // Debounce filter changes to avoid too many API calls
-  const debouncedFilters = useDebounce(amenityFilters.required, 300);
+  // Debounce filter changes - 150ms for snappier feel
+  const debouncedFilters = useDebounce(amenityFilters.required, 150);
   const fetchController = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -60,6 +65,11 @@ export default function ListingsTable({ refreshTrigger }: Props) {
     };
     fetchCities();
   }, [refreshTrigger]);
+
+  useEffect(() => {
+    // Reset page when filters change
+    setPage(0);
+  }, [selectedCity, selectedState, selectedBedrooms, debouncedFilters, selectedListingType, showCreativeOnly]);
 
   useEffect(() => {
     // Cancel previous request
@@ -86,12 +96,13 @@ export default function ListingsTable({ refreshTrigger }: Props) {
           undefined,
           undefined,
           apiFilters,
-          200, // Limit for performance
-          0,
+          PAGE_SIZE,
+          page * PAGE_SIZE,
           selectedListingType || undefined,
           showCreativeOnly || undefined
         );
         setListings(data);
+        setHasMore(data.length === PAGE_SIZE);
       } catch (error: any) {
         if (error?.name !== 'AbortError') {
           console.error('Failed to fetch listings:', error);
@@ -105,7 +116,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
     return () => {
       fetchController.current?.abort();
     };
-  }, [selectedCity, selectedState, selectedBedrooms, debouncedFilters, selectedListingType, showCreativeOnly, refreshTrigger]);
+  }, [selectedCity, selectedState, selectedBedrooms, debouncedFilters, selectedListingType, showCreativeOnly, refreshTrigger, page]);
 
   useEffect(() => {
     const fetchCounts = async () => {
@@ -550,11 +561,28 @@ export default function ListingsTable({ refreshTrigger }: Props) {
             </table>
           </div>
           
-          {/* Export buttons and summary */}
+          {/* Pagination and Export */}
           <div className="mt-4 flex items-center justify-between">
-            <div className="text-sm text-gray-500">
-              Showing {sortedListings.length} listing{sortedListings.length !== 1 ? 's' : ''}
-              {amenityCounts && ` of ${amenityCounts.total} total`}
+            <div className="flex items-center gap-4">
+              <div className="text-sm text-gray-500">
+                Page {page + 1} • Showing {sortedListings.length} listing{sortedListings.length !== 1 ? 's' : ''}
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setPage(p => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  className="btn-secondary text-sm py-1 px-3 disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <button 
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={!hasMore}
+                  className="btn-secondary text-sm py-1 px-3 disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
             </div>
             <div className="flex gap-2">
               <button onClick={exportToCSV} className="btn-secondary text-sm">

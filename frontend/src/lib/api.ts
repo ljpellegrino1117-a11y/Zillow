@@ -2,6 +2,35 @@ import axios from 'axios';
 
 const API_BASE = '/api';
 
+// Simple client-side cache with 60 second TTL
+const cache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 60000; // 60 seconds
+
+function getCached<T>(key: string): T | null {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data as T;
+  }
+  cache.delete(key);
+  return null;
+}
+
+function setCache(key: string, data: any): void {
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
+export function invalidateCache(pattern?: string): void {
+  if (!pattern) {
+    cache.clear();
+  } else {
+    for (const key of cache.keys()) {
+      if (key.includes(pattern)) {
+        cache.delete(key);
+      }
+    }
+  }
+}
+
 export interface City {
   id: number;
   city: string;
@@ -156,9 +185,14 @@ export interface AmenityCounts extends AmenityFilters {
   total: number;
 }
 
-// City API
+// City API (cached)
 export const getCities = async (): Promise<City[]> => {
+  const cacheKey = 'cities';
+  const cached = getCached<City[]>(cacheKey);
+  if (cached) return cached;
+  
   const response = await axios.get(`${API_BASE}/cities`);
+  setCache(cacheKey, response.data);
   return response.data;
 };
 
@@ -188,12 +222,14 @@ export const createCity = async (params: CreateCityParams): Promise<City> => {
     purchase_price_min: params.purchasePriceMin || null,
     purchase_price_max: params.purchasePriceMax || null
   });
+  invalidateCache('cities');
   return response.data;
 };
 
 export const deleteCity = async (city: string, state: string, zipCode?: string): Promise<void> => {
   const params = zipCode ? `?zip_code=${encodeURIComponent(zipCode)}` : '';
   await axios.delete(`${API_BASE}/cities/${encodeURIComponent(city)}/${encodeURIComponent(state)}${params}`);
+  invalidateCache(); // Clear all cache when city deleted
 };
 
 // Scraping API

@@ -22,7 +22,7 @@ interface Props {
 const BEDROOM_OPTIONS = [3, 4, 5, 6, 7, 8];
 const columnHelper = createColumnHelper<DiscrepancyResult>();
 
-// Debounce hook
+// Debounce hook - 150ms for snappier feel
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
   useEffect(() => {
@@ -45,8 +45,8 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
     { id: 'airdna_to_rent_ratio', desc: true },
   ]);
   
-  // Debounce filter changes
-  const debouncedFilters = useDebounce(amenityFilters.required, 300);
+  // Debounce filter changes - 150ms for snappier feel
+  const debouncedFilters = useDebounce(amenityFilters.required, 150);
 
   useEffect(() => {
     const fetchCities = async () => {

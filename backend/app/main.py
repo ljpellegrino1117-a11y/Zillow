@@ -57,8 +57,8 @@ class SimpleCache:
                 del self.cache[k]
                 del self.timestamps[k]
 
-# Global cache instance
-cache = SimpleCache(ttl_seconds=30)
+# Global cache instance - 2 minute TTL for faster responses
+cache = SimpleCache(ttl_seconds=120)
 
 app = FastAPI(
     title="Zillow Arbitrage API",
