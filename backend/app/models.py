@@ -80,6 +80,12 @@ class ZillowListing(Base):
     has_attic = Column(Boolean, default=False)
     has_mother_in_law = Column(Boolean, default=False)  # Mother-in-law suite/apartment
     
+    # Listing type and creative financing (for for-sale listings)
+    listing_type = Column(String(20), default='rental', index=True)  # 'rental' or 'for_sale'
+    sale_price = Column(Float)  # For for-sale listings
+    has_creative_financing = Column(Boolean, default=False, index=True)
+    financing_keywords = Column(Text)  # JSON list of matched keywords
+    
     scraped_at = Column(DateTime, default=datetime.utcnow)
 
     city_rel = relationship("City", back_populates="listings")

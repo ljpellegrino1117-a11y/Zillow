@@ -59,6 +59,11 @@ export interface ZillowListing {
   has_studio: boolean;
   has_attic: boolean;
   has_mother_in_law: boolean;
+  // Listing type and creative financing
+  listing_type: 'rental' | 'for_sale';
+  sale_price: number | null;
+  has_creative_financing: boolean;
+  financing_keywords: string | null;
   scraped_at: string;
 }
 
@@ -167,7 +172,9 @@ export const getListings = async (
   maxPrice?: number,
   amenityFilters?: AmenityFilters,
   limit = 100,
-  offset = 0
+  offset = 0,
+  listingType?: string,
+  hasCreativeFinancing?: boolean
 ): Promise<ZillowListing[]> => {
   const params = new URLSearchParams();
   if (city) params.append('city', city);
@@ -177,6 +184,10 @@ export const getListings = async (
   if (maxBedrooms !== undefined) params.append('max_bedrooms', maxBedrooms.toString());
   if (minPrice !== undefined) params.append('min_price', minPrice.toString());
   if (maxPrice !== undefined) params.append('max_price', maxPrice.toString());
+  
+  // Listing type and creative financing filters
+  if (listingType) params.append('listing_type', listingType);
+  if (hasCreativeFinancing) params.append('has_creative_financing', 'true');
   
   // Add amenity filters
   if (amenityFilters) {

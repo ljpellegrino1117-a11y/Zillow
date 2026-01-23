@@ -96,6 +96,11 @@ class ZillowListingResponse(ZillowListingBase):
     has_studio: bool = False
     has_attic: bool = False
     has_mother_in_law: bool = False
+    # Listing type and creative financing
+    listing_type: str = 'rental'
+    sale_price: Optional[float] = None
+    has_creative_financing: bool = False
+    financing_keywords: Optional[str] = None
     scraped_at: datetime
 
     class Config:

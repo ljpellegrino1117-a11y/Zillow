@@ -162,6 +162,11 @@ async def run_scrape_job(city: str, state: str, min_bedrooms: int, max_bedrooms:
                     has_studio=listing_data.get('has_studio', False),
                     has_attic=listing_data.get('has_attic', False),
                     has_mother_in_law=listing_data.get('has_mother_in_law', False),
+                    # Listing type and creative financing
+                    listing_type=listing_data.get('listing_type', 'rental'),
+                    sale_price=listing_data.get('sale_price'),
+                    has_creative_financing=listing_data.get('has_creative_financing', False),
+                    financing_keywords=listing_data.get('financing_keywords'),
                 )
                 db.add(listing)
             
@@ -251,6 +256,9 @@ def get_listings(
     max_bedrooms: Optional[int] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
+    # Listing type filters
+    listing_type: Optional[str] = None,  # 'rental', 'for_sale', or None for all
+    has_creative_financing: Optional[bool] = None,
     # Amenity filters
     has_pool: Optional[bool] = None,
     has_waterview: Optional[bool] = None,
@@ -311,6 +319,12 @@ def get_listings(
         query = query.filter(ZillowListing.price >= min_price)
     if max_price is not None:
         query = query.filter(ZillowListing.price <= max_price)
+    
+    # Listing type filters
+    if listing_type:
+        query = query.filter(ZillowListing.listing_type == listing_type)
+    if has_creative_financing is True:
+        query = query.filter(ZillowListing.has_creative_financing == True)
     
     # Amenity filters (when True, require the amenity)
     if has_pool is True:

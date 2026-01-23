@@ -103,7 +103,9 @@ EXTRA_ROOM_PATTERNS = {
     },
     'has_den': {
         'patterns': [
-            r'\bden\b', r'\bstudy\b', r'\blibrary\b', r'\breading\s*room\b'
+            r'\bden\b', r'\bstudy\b', r'\blibrary\b', r'\breading\s*room\b',
+            r'\bprivate\s*room\b', r'\bsitting\s*room\b', r'\bparlor\b',
+            r'\bparlour\b', r'\bmorning\s*room\b', r'\bkeeping\s*room\b'
         ],
         'label': 'Den/Study',
         'counts_as_bedroom': True
@@ -111,14 +113,20 @@ EXTRA_ROOM_PATTERNS = {
     'has_bonus_room': {
         'patterns': [
             r'\bbonus\s*room\b', r'\bbonus\s*space\b', r'\bextra\s*room\b',
-            r'\badditional\s*room\b', r'\bspare\s*room\b'
+            r'\badditional\s*room\b', r'\bspare\s*room\b', r'\b4th\s*room\b',
+            r'\b5th\s*room\b', r'\b6th\s*room\b', r'\bfourth\s*room\b',
+            r'\bfifth\s*room\b', r'\bsixth\s*room\b', r'\bextra\s*space\b',
+            r'\badditional\s*space\b', r'\bversatile\s*room\b',
+            r'\bpossible\s*(?:4th|5th|fourth|fifth)\s*(?:bed)?(?:room)?\b',
+            r'\bcould\s*be\s*(?:a\s*)?(?:bed)?room\b', r'\bpotential\s*bedroom\b'
         ],
         'label': 'Bonus Room',
         'counts_as_bedroom': True
     },
     'has_loft': {
         'patterns': [
-            r'\bloft\b', r'\bloft\s*space\b', r'\bloft\s*area\b'
+            r'\bloft\b', r'\bloft\s*space\b', r'\bloft\s*area\b',
+            r'\bmezzanine\b', r'\bupper\s*level\s*(?:open|loft)\b'
         ],
         'label': 'Loft',
         'counts_as_bedroom': True
@@ -126,7 +134,8 @@ EXTRA_ROOM_PATTERNS = {
     'has_flex_space': {
         'patterns': [
             r'\bflex\s*space\b', r'\bflex\s*room\b', r'\bmulti-?purpose\b',
-            r'\bversatile\s*space\b', r'\bconvertible\b'
+            r'\bversatile\s*space\b', r'\bconvertible\b', r'\bmultiple\s*uses\b',
+            r'\buse\s*as\s*(?:you\s*)?(?:like|wish|want)\b'
         ],
         'label': 'Flex Space',
         'counts_as_bedroom': True
@@ -134,7 +143,9 @@ EXTRA_ROOM_PATTERNS = {
     'has_sunroom': {
         'patterns': [
             r'\bsunroom\b', r'\bsun\s*room\b', r'\bsolarium\b', 
-            r'\bflorida\s*room\b', r'\bconservatory\b', r'\benclosed\s*porch\b'
+            r'\bflorida\s*room\b', r'\bconservatory\b', r'\benclosed\s*porch\b',
+            r'\bthree[\s-]?season\b', r'\b3[\s-]?season\b', r'\bfour[\s-]?season\b',
+            r'\b4[\s-]?season\b', r'\bscreened\s*(?:in\s*)?(?:room|porch)\b'
         ],
         'label': 'Sunroom',
         'counts_as_bedroom': True
@@ -142,7 +153,8 @@ EXTRA_ROOM_PATTERNS = {
     'has_media_room': {
         'patterns': [
             r'\bmedia\s*room\b', r'\btheater\s*room\b', r'\btheatre\s*room\b',
-            r'\bhome\s*theater\b', r'\bmovie\s*room\b', r'\bscreening\s*room\b'
+            r'\bhome\s*theater\b', r'\bmovie\s*room\b', r'\bscreening\s*room\b',
+            r'\btv\s*room\b', r'\btelevision\s*room\b'
         ],
         'label': 'Media Room',
         'counts_as_bedroom': True
@@ -150,7 +162,8 @@ EXTRA_ROOM_PATTERNS = {
     'has_game_room': {
         'patterns': [
             r'\bgame\s*room\b', r'\brec\s*room\b', r'\brecreation\s*room\b',
-            r'\bplay\s*room\b', r'\bplayroom\b', r'\bentertainment\s*room\b'
+            r'\bplay\s*room\b', r'\bplayroom\b', r'\bentertainment\s*room\b',
+            r'\bman\s*cave\b', r'\bshe\s*shed\b', r'\bhang\s*out\b'
         ],
         'label': 'Game/Rec Room',
         'counts_as_bedroom': True
@@ -172,7 +185,8 @@ EXTRA_ROOM_PATTERNS = {
     'has_studio': {
         'patterns': [
             r'\bstudio\s*space\b', r'\bart\s*studio\b', r'\bmusic\s*studio\b',
-            r'\bcraft\s*room\b', r'\bhobby\s*room\b'
+            r'\bcraft\s*room\b', r'\bhobby\s*room\b', r'\bworkshop\b',
+            r'\bsewing\s*room\b', r'\bexercise\s*room\b'
         ],
         'label': 'Studio/Hobby Room',
         'counts_as_bedroom': True
@@ -180,7 +194,8 @@ EXTRA_ROOM_PATTERNS = {
     'has_attic': {
         'patterns': [
             r'\bfinished\s*attic\b', r'\battic\s*space\b', r'\battic\s*room\b',
-            r'\bconverted\s*attic\b', r'\busable\s*attic\b'
+            r'\bconverted\s*attic\b', r'\busable\s*attic\b', r'\bwalk[\s-]?up\s*attic\b',
+            r'\battic\s*(?:bed)?room\b'
         ],
         'label': 'Finished Attic',
         'counts_as_bedroom': True
@@ -190,12 +205,33 @@ EXTRA_ROOM_PATTERNS = {
             r'\bmother[\s-]?in[\s-]?law\b', r'\bin[\s-]?law\s*suite\b',
             r'\bguest\s*house\b', r'\bgranny\s*flat\b', r'\badu\b',
             r'\baccessory\s*dwelling\b', r'\bseparate\s*living\b',
-            r'\bcarriage\s*house\b', r'\bpool\s*house\b'
+            r'\bcarriage\s*house\b', r'\bpool\s*house\b', r'\bcasita\b',
+            r'\bdetached\s*(?:unit|suite|apartment)\b', r'\bsecond\s*(?:unit|suite)\b',
+            r'\brental\s*unit\b', r'\bincome\s*(?:unit|property|potential)\b'
         ],
         'label': 'In-Law Suite/ADU',
         'counts_as_bedroom': True
     },
 }
+
+# Creative financing keywords for for-sale listings
+CREATIVE_FINANCING_PATTERNS = [
+    r'\bowner\s*financ(?:e|ing)\b', r'\bseller\s*financ(?:e|ing)\b',
+    r'\brent[\s-]?to[\s-]?own\b', r'\blease[\s-]?(?:to[\s-]?)?(?:own|option|purchase)\b',
+    r'\bcreative\s*financ(?:e|ing)\b', r'\bseller\s*motivated\b',
+    r'\bmotivated\s*seller\b', r'\bflexible\s*(?:terms|financing)\b',
+    r'\bwill\s*(?:consider|carry)\b', r'\bcarry\s*(?:back|the\s*note)\b',
+    r'\bno\s*(?:bank|credit)\s*(?:needed|required|check)\b',
+    r'\bsubject[\s-]?to\b', r'\bassumable\s*(?:loan|mortgage)\b',
+    r'\bwrap(?:around)?\s*(?:mortgage|loan)\b', r'\bcontract\s*for\s*deed\b',
+    r'\bland\s*contract\b', r'\binstallment\s*(?:sale|contract)\b',
+    r'\bbond\s*for\s*(?:deed|title)\b', r'\bequity\s*share\b',
+    r'\bmaster\s*lease\b', r'\bsandwich\s*lease\b',
+    r'\bmake\s*(?:an?\s*)?offer\b', r'\bwill\s*negotiate\b',
+    r'\bbring\s*(?:all\s*)?offers\b', r'\ball\s*offers\s*(?:considered|welcome)\b',
+    r'\bmust\s*sell\b', r'\bquick\s*sale\b', r'\bprice\s*reduced\b',
+    r'\bdesperate\b', r'\brelocating\b', r'\bdivorce\b',
+]
 
 
 def detect_amenities(description: str, amenities_list: List[str] = None) -> Dict[str, bool]:
@@ -286,6 +322,37 @@ def detect_extra_rooms(description: str, amenities_list: List[str] = None, bedro
     return results
 
 
+def detect_creative_financing(description: str) -> Dict[str, Any]:
+    """
+    Detect if a listing mentions creative financing options.
+    Used to identify for-sale listings that could be acquired creatively.
+    
+    Args:
+        description: Property description text
+        
+    Returns:
+        Dict with creative financing flag and matched keywords
+    """
+    if not description:
+        return {'has_creative_financing': False, 'financing_keywords': None}
+    
+    text = description.lower()
+    matched_keywords = []
+    
+    for pattern in CREATIVE_FINANCING_PATTERNS:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            matched_keywords.append(match.group(0).strip())
+    
+    # Remove duplicates while preserving order
+    matched_keywords = list(dict.fromkeys(matched_keywords))
+    
+    return {
+        'has_creative_financing': len(matched_keywords) > 0,
+        'financing_keywords': json.dumps(matched_keywords) if matched_keywords else None
+    }
+
+
 class ZillowScraperAPI:
     """
     Scrapes Zillow rental listings using ScraperAPI.
@@ -319,15 +386,31 @@ class ZillowScraperAPI:
         if self.client:
             await self.client.aclose()
     
-    def _build_zillow_url(self, city: str, state: str, bedrooms: int, page: int = 1) -> str:
-        """Build Zillow rental search URL for a city."""
+    def _build_zillow_url(self, city: str, state: str, bedrooms: int, page: int = 1, listing_type: str = 'rental') -> str:
+        """Build Zillow search URL for a city.
+        
+        Args:
+            city: City name
+            state: State abbreviation
+            bedrooms: Number of bedrooms to filter
+            page: Page number
+            listing_type: 'rental' or 'for_sale'
+        """
         # Format: city-state (e.g., "chicago-il", "miami-fl")
         city_slug = city.lower().replace(' ', '-')
         state_slug = state.lower()
         
-        base = f"https://www.zillow.com/{city_slug}-{state_slug}/rentals/"
-        if bedrooms:
-            base += f"{bedrooms}-bedrooms/"
+        if listing_type == 'for_sale':
+            # For sale listings
+            base = f"https://www.zillow.com/{city_slug}-{state_slug}/"
+            if bedrooms:
+                base += f"{bedrooms}-bedrooms/"
+        else:
+            # Rental listings
+            base = f"https://www.zillow.com/{city_slug}-{state_slug}/rentals/"
+            if bedrooms:
+                base += f"{bedrooms}-bedrooms/"
+        
         if page > 1:
             base += f"{page}_p/"
         return base
@@ -374,7 +457,7 @@ class ZillowScraperAPI:
         
         return None
     
-    def _extract_listings_from_html(self, html: str, city: str, state: str) -> List[Dict[str, Any]]:
+    def _extract_listings_from_html(self, html: str, city: str, state: str, listing_type: str = 'rental') -> List[Dict[str, Any]]:
         """Extract listing data from Zillow HTML."""
         listings = []
         soup = BeautifulSoup(html, 'lxml')
@@ -388,7 +471,7 @@ class ZillowScraperAPI:
             try:
                 data = json.loads(script.string)
                 if isinstance(data, dict):
-                    found = self._parse_json_data(data, city, state)
+                    found = self._parse_json_data(data, city, state, listing_type)
                     listings.extend(found)
             except (json.JSONDecodeError, TypeError):
                 continue
@@ -399,14 +482,14 @@ class ZillowScraperAPI:
             try:
                 data = json.loads(next_data.string)
                 props = data.get('props', {}).get('pageProps', {})
-                found = self._parse_json_data(props, city, state)
+                found = self._parse_json_data(props, city, state, listing_type)
                 listings.extend(found)
             except (json.JSONDecodeError, TypeError):
                 pass
         
         # METHOD 3: Parse HTML cards (fallback)
         if not listings:
-            listings = self._parse_html_cards(soup, city, state)
+            listings = self._parse_html_cards(soup, city, state, listing_type)
         
         # Deduplicate by zillow_id
         seen = set()
@@ -419,7 +502,7 @@ class ZillowScraperAPI:
         
         return unique
     
-    def _parse_json_data(self, data: Dict, city: str, state: str, depth: int = 0) -> List[Dict[str, Any]]:
+    def _parse_json_data(self, data: Dict, city: str, state: str, listing_type: str = 'rental', depth: int = 0) -> List[Dict[str, Any]]:
         """Recursively search for listing data in JSON."""
         if depth > 15:
             return []
@@ -427,7 +510,7 @@ class ZillowScraperAPI:
         listings = []
         
         if self._is_listing_object(data):
-            listing = self._extract_listing(data, city, state)
+            listing = self._extract_listing(data, city, state, listing_type)
             if listing:
                 listings.append(listing)
                 return listings
@@ -443,19 +526,19 @@ class ZillowScraperAPI:
                 if isinstance(value, list):
                     for item in value:
                         if isinstance(item, dict):
-                            listings.extend(self._parse_json_data(item, city, state, depth + 1))
+                            listings.extend(self._parse_json_data(item, city, state, listing_type, depth + 1))
                 elif isinstance(value, dict):
-                    listings.extend(self._parse_json_data(value, city, state, depth + 1))
+                    listings.extend(self._parse_json_data(value, city, state, listing_type, depth + 1))
         
         for key, value in data.items():
             if key in search_keys:
                 continue
             if isinstance(value, dict):
-                listings.extend(self._parse_json_data(value, city, state, depth + 1))
+                listings.extend(self._parse_json_data(value, city, state, listing_type, depth + 1))
             elif isinstance(value, list) and len(value) < 100:
                 for item in value:
                     if isinstance(item, dict):
-                        listings.extend(self._parse_json_data(item, city, state, depth + 1))
+                        listings.extend(self._parse_json_data(item, city, state, listing_type, depth + 1))
         
         return listings
     
@@ -466,7 +549,7 @@ class ZillowScraperAPI:
         has_price = any(k in data for k in ['price', 'unformattedPrice', 'rent'])
         return has_id and (has_address or has_price)
     
-    def _extract_listing(self, data: Dict, search_city: str, search_state: str) -> Optional[Dict[str, Any]]:
+    def _extract_listing(self, data: Dict, search_city: str, search_state: str, listing_type: str = 'rental') -> Optional[Dict[str, Any]]:
         """Extract listing details from a JSON object."""
         try:
             zpid = data.get('zpid') or data.get('id') or data.get('propertyId')
@@ -492,30 +575,59 @@ class ZillowScraperAPI:
             if not address:
                 return None
             
-            # Get price
+            # Get prices (rent price and/or sale price)
             price = None
-            for field in ['price', 'unformattedPrice', 'rent', 'rentPrice', 'listPrice']:
+            sale_price = None
+            
+            # First, check for rent price
+            for field in ['rent', 'rentPrice', 'rentZestimate']:
                 if field in data and data[field]:
                     val = data[field]
                     if isinstance(val, (int, float)) and val > 0:
                         price = float(val)
                         break
+            
+            # Check for sale/list price
+            for field in ['price', 'unformattedPrice', 'listPrice']:
+                if field in data and data[field]:
+                    val = data[field]
+                    if isinstance(val, (int, float)) and val > 0:
+                        # Prices over 10000 are likely sale prices, not rent
+                        if val > 10000:
+                            sale_price = float(val)
+                        else:
+                            if price is None:
+                                price = float(val)
+                        break
                     elif isinstance(val, str):
                         nums = re.findall(r'[\d,]+', val.replace(',', ''))
                         if nums:
                             try:
-                                price = float(nums[0].replace(',', ''))
+                                parsed = float(nums[0].replace(',', ''))
+                                if parsed > 10000:
+                                    sale_price = parsed
+                                elif price is None:
+                                    price = parsed
                                 break
                             except ValueError:
                                 continue
             
-            if not price and 'rentZestimate' in data:
-                val = data['rentZestimate']
-                if isinstance(val, (int, float)) and val > 0:
-                    price = float(val)
-            
-            if not price or price < 100:
-                return None
+            # For for_sale listings, sale_price becomes the main price indicator
+            if listing_type == 'for_sale':
+                if sale_price is None:
+                    # Try to get price again for sale listings
+                    for field in ['price', 'unformattedPrice', 'listPrice']:
+                        if field in data and data[field]:
+                            val = data[field]
+                            if isinstance(val, (int, float)) and val > 0:
+                                sale_price = float(val)
+                                break
+                if sale_price is None or sale_price < 10000:
+                    return None  # Skip for-sale listings without valid sale price
+            else:
+                # For rentals, we need a rent price
+                if not price or price < 100:
+                    return None
             
             # Get beds/baths
             beds = data.get('beds') or data.get('bedrooms') or 0
@@ -551,6 +663,9 @@ class ZillowScraperAPI:
             bedroom_count = int(beds) if beds else 0
             extra_rooms = detect_extra_rooms(desc, amenities_list, bedroom_count)
             
+            # Detect creative financing for for-sale listings
+            financing = detect_creative_financing(desc)
+            
             listing = {
                 'zillow_id': str(zpid),
                 'address': address.strip(),
@@ -559,12 +674,16 @@ class ZillowScraperAPI:
                 'zip_code': zip_code.strip() if zip_code else None,
                 'bedrooms': bedroom_count,
                 'bathrooms': float(baths) if baths else None,
-                'price': price,
+                'price': price,  # Monthly rent (may be None for for-sale)
+                'sale_price': sale_price,  # Sale price for for-sale listings
+                'listing_type': listing_type,
                 'description': desc,
                 'property_type': data.get('propertyType') or data.get('homeType', ''),
                 'sqft': data.get('livingArea') or data.get('sqft'),
                 'url': f"https://www.zillow.com/homedetails/{zpid}_zpid/",
                 'amenities_raw': json.dumps(amenities_list) if amenities_list else None,
+                'has_creative_financing': financing['has_creative_financing'],
+                'financing_keywords': financing['financing_keywords'],
             }
             
             # Add detected amenities and extra rooms
@@ -576,7 +695,7 @@ class ZillowScraperAPI:
             logger.error(f"Error extracting listing: {e}")
             return None
     
-    def _parse_html_cards(self, soup: BeautifulSoup, city: str, state: str) -> List[Dict[str, Any]]:
+    def _parse_html_cards(self, soup: BeautifulSoup, city: str, state: str, listing_type: str = 'rental') -> List[Dict[str, Any]]:
         """Parse listing cards from HTML (fallback method)."""
         listings = []
         
@@ -609,11 +728,16 @@ class ZillowScraperAPI:
                 
                 price_el = card.select_one('[data-test="property-card-price"]') or card.select_one('[class*="price"]')
                 price = None
+                sale_price = None
                 if price_el:
                     txt = price_el.get_text(strip=True)
                     nums = re.findall(r'[\d,]+', txt)
                     if nums:
-                        price = float(nums[0].replace(',', ''))
+                        parsed_price = float(nums[0].replace(',', ''))
+                        if listing_type == 'for_sale' or parsed_price > 10000:
+                            sale_price = parsed_price
+                        else:
+                            price = parsed_price
                 
                 card_text = card.get_text()
                 beds_m = re.search(r'(\d+)\s*(?:bd|bed)', card_text, re.I)
@@ -621,10 +745,14 @@ class ZillowScraperAPI:
                 beds = int(beds_m.group(1)) if beds_m else 0
                 baths = float(baths_m.group(1)) if baths_m else None
                 
-                if address and price:
+                # For for-sale, require sale_price; for rentals, require price
+                valid = (listing_type == 'for_sale' and sale_price) or (listing_type == 'rental' and price)
+                
+                if address and valid:
                     # Basic amenity detection from card text
                     detected = detect_amenities(card_text, [])
                     extra_rooms = detect_extra_rooms(card_text, [], beds)
+                    financing = detect_creative_financing(card_text)
                     
                     listing = {
                         'zillow_id': zpid or f"html_{hash(address) % 10000000}",
@@ -635,11 +763,15 @@ class ZillowScraperAPI:
                         'bedrooms': beds,
                         'bathrooms': baths,
                         'price': price,
+                        'sale_price': sale_price,
+                        'listing_type': listing_type,
                         'description': None,
                         'property_type': None,
                         'sqft': None,
                         'url': url,
                         'amenities_raw': None,
+                        'has_creative_financing': financing['has_creative_financing'],
+                        'financing_keywords': financing['financing_keywords'],
                     }
                     listing.update(detected)
                     listing.update(extra_rooms)
@@ -666,38 +798,31 @@ class ZillowScraperAPI:
                     return min(max(pages), 20)
         return 1
     
-    async def scrape_city(
+    async def _scrape_listing_type(
         self,
         city: str,
         state: str,
-        min_bedrooms: int = 3,
-        max_bedrooms: int = 8,
-        max_pages_per_bedroom: int = 10
+        min_bedrooms: int,
+        max_bedrooms: int,
+        max_pages_per_bedroom: int,
+        listing_type: str,
+        seen_ids: set,
+        filter_creative_financing: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        Scrape all rental listings for a city.
-        
-        Args:
-            city: City name (e.g., "Chicago", "Miami")
-            state: State abbreviation (e.g., "IL", "FL")
-            min_bedrooms: Minimum bedroom count (default 3)
-            max_bedrooms: Maximum bedroom count (default 8)
-            max_pages_per_bedroom: Max pages per bedroom count
-            
-        Returns:
-            List of listing dictionaries
+        Scrape listings of a specific type (rental or for_sale).
         """
         all_listings = []
-        seen_ids = set()
+        type_label = "FOR SALE" if listing_type == 'for_sale' else "RENTALS"
         
         for bedrooms in range(min_bedrooms, max_bedrooms + 1):
-            logger.info(f"Scraping {city}, {state} - {bedrooms} bedrooms...")
+            logger.info(f"Scraping {city}, {state} [{type_label}] - {bedrooms} bedrooms...")
             
             page = 1
             empty_pages = 0
             
             while page <= max_pages_per_bedroom:
-                url = self._build_zillow_url(city, state, bedrooms, page)
+                url = self._build_zillow_url(city, state, bedrooms, page, listing_type)
                 html = await self._fetch_page(url)
                 
                 if not html:
@@ -708,7 +833,7 @@ class ZillowScraperAPI:
                     logger.info(f"  No results for {bedrooms} BR")
                     break
                 
-                listings = self._extract_listings_from_html(html, city, state)
+                listings = self._extract_listings_from_html(html, city, state, listing_type)
                 
                 if not listings:
                     empty_pages += 1
@@ -731,6 +856,10 @@ class ZillowScraperAPI:
                         if listing['bedrooms'] == bedrooms or listing['bedrooms'] == 0:
                             if listing['bedrooms'] == 0:
                                 listing['bedrooms'] = bedrooms
+                            
+                            # For for-sale listings, only keep if has creative financing
+                            if filter_creative_financing and not listing.get('has_creative_financing'):
+                                continue
                             
                             seen_ids.add(lid)
                             all_listings.append(listing)
@@ -759,7 +888,58 @@ class ZillowScraperAPI:
             
             await asyncio.sleep(2)
         
-        logger.info(f"Total: {len(all_listings)} listings for {city}, {state}")
+        return all_listings
+    
+    async def scrape_city(
+        self,
+        city: str,
+        state: str,
+        min_bedrooms: int = 3,
+        max_bedrooms: int = 8,
+        max_pages_per_bedroom: int = 10,
+        include_for_sale_creative: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Scrape rental listings and optionally for-sale listings with creative financing.
+        
+        Args:
+            city: City name (e.g., "Chicago", "Miami")
+            state: State abbreviation (e.g., "IL", "FL")
+            min_bedrooms: Minimum bedroom count (default 3)
+            max_bedrooms: Maximum bedroom count (default 8)
+            max_pages_per_bedroom: Max pages per bedroom count
+            include_for_sale_creative: Also scrape for-sale with creative financing terms
+            
+        Returns:
+            List of listing dictionaries
+        """
+        all_listings = []
+        seen_ids = set()
+        
+        # 1. Scrape RENTAL listings
+        logger.info(f"=== Scraping RENTAL listings for {city}, {state} ===")
+        rentals = await self._scrape_listing_type(
+            city, state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
+            listing_type='rental',
+            seen_ids=seen_ids,
+            filter_creative_financing=False
+        )
+        all_listings.extend(rentals)
+        logger.info(f"Found {len(rentals)} rental listings")
+        
+        # 2. Scrape FOR SALE listings (only keep creative financing)
+        if include_for_sale_creative:
+            logger.info(f"\n=== Scraping FOR SALE listings (creative financing only) for {city}, {state} ===")
+            for_sale = await self._scrape_listing_type(
+                city, state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
+                listing_type='for_sale',
+                seen_ids=seen_ids,
+                filter_creative_financing=True  # Only keep listings with creative financing terms
+            )
+            all_listings.extend(for_sale)
+            logger.info(f"Found {len(for_sale)} for-sale listings with creative financing")
+        
+        logger.info(f"\nTotal: {len(all_listings)} listings for {city}, {state}")
         return all_listings
 
 

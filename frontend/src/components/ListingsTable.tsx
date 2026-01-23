@@ -11,6 +11,11 @@ interface Props {
 }
 
 const BEDROOM_OPTIONS = [3, 4, 5, 6, 7, 8];
+const LISTING_TYPE_OPTIONS = [
+  { value: '', label: 'All Types' },
+  { value: 'rental', label: 'Rentals Only' },
+  { value: 'for_sale', label: 'For Sale Only' },
+];
 
 export default function ListingsTable({ refreshTrigger }: Props) {
   const [listings, setListings] = useState<ZillowListing[]>([]);
@@ -18,6 +23,8 @@ export default function ListingsTable({ refreshTrigger }: Props) {
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [selectedState, setSelectedState] = useState<string>('');
   const [selectedBedrooms, setSelectedBedrooms] = useState<number | undefined>(undefined);
+  const [selectedListingType, setSelectedListingType] = useState<string>('');
+  const [showCreativeOnly, setShowCreativeOnly] = useState(false);
   const [amenityFilters, setAmenityFilters] = useState<AmenityFilters>({});
   const [amenityCounts, setAmenityCounts] = useState<AmenityCounts | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,7 +55,10 @@ export default function ListingsTable({ refreshTrigger }: Props) {
           undefined,
           undefined,
           amenityFilters,
-          100
+          100,
+          0,
+          selectedListingType || undefined,
+          showCreativeOnly || undefined
         );
         setListings(data);
       } catch (error) {
@@ -58,7 +68,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
       }
     };
     fetchListings();
-  }, [selectedCity, selectedState, selectedBedrooms, amenityFilters, refreshTrigger]);
+  }, [selectedCity, selectedState, selectedBedrooms, amenityFilters, selectedListingType, showCreativeOnly, refreshTrigger]);
 
   useEffect(() => {
     const fetchCounts = async () => {
@@ -155,6 +165,29 @@ export default function ListingsTable({ refreshTrigger }: Props) {
               ))}
             </select>
           </div>
+          <div className="w-40">
+            <label className="input-label">Type</label>
+            <select
+              value={selectedListingType}
+              onChange={(e) => setSelectedListingType(e.target.value)}
+              className="input"
+            >
+              {LISTING_TYPE_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end gap-2">
+            <label className="flex items-center gap-2 cursor-pointer bg-yellow-50 px-3 py-2 rounded-lg border border-yellow-200">
+              <input
+                type="checkbox"
+                checked={showCreativeOnly}
+                onChange={(e) => setShowCreativeOnly(e.target.checked)}
+                className="rounded text-yellow-600 focus:ring-yellow-500"
+              />
+              <span className="text-sm font-medium text-yellow-800">Creative $ Only</span>
+            </label>
+          </div>
           <div className="flex items-end">
             <button
               onClick={() => setShowFilters(!showFilters)}
@@ -196,6 +229,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
             <table>
               <thead className="sticky top-0">
                 <tr>
+                  <th>Type</th>
                   <th>Address</th>
                   <th>BR</th>
                   <th>Potential BR</th>
@@ -209,6 +243,24 @@ export default function ListingsTable({ refreshTrigger }: Props) {
               <tbody>
                 {listings.map((listing) => (
                   <tr key={listing.id}>
+                    <td>
+                      <div className="flex flex-col gap-1">
+                        {listing.listing_type === 'for_sale' ? (
+                          <span className="text-xs font-semibold bg-purple-100 text-purple-700 px-2 py-0.5 rounded w-fit">
+                            FOR SALE
+                          </span>
+                        ) : (
+                          <span className="text-xs font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded w-fit">
+                            RENTAL
+                          </span>
+                        )}
+                        {listing.has_creative_financing && (
+                          <span className="text-xs font-semibold bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded w-fit" title={listing.financing_keywords || 'Creative financing available'}>
+                            CREATIVE $
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <div className="max-w-xs truncate font-medium" title={listing.address}>
                         {listing.address}
@@ -231,7 +283,22 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                       )}
                     </td>
                     <td>{listing.bathrooms || '—'}</td>
-                    <td className="font-semibold text-green-600">{formatCurrency(listing.price)}/mo</td>
+                    <td>
+                      {listing.listing_type === 'for_sale' ? (
+                        <div>
+                          <div className="font-semibold text-purple-600">
+                            {listing.sale_price ? formatCurrency(listing.sale_price) : '—'}
+                          </div>
+                          {listing.price && (
+                            <div className="text-xs text-gray-500">
+                              Est. rent: {formatCurrency(listing.price)}/mo
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="font-semibold text-green-600">{formatCurrency(listing.price)}/mo</span>
+                      )}
+                    </td>
                     <td>
                       <div className="flex flex-wrap gap-1">
                         {getExtraRoomBadges(listing).slice(0, 3).map((badge, i) => (
