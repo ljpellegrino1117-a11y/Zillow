@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -8,9 +8,9 @@ import asyncio
 import logging
 
 from .database import engine, get_db, Base
-from .models import ZipCode, ZillowListing, AirDNAData
+from .models import City, ZillowListing, AirDNAData
 from .schemas import (
-    ZipCodeCreate, ZipCodeResponse,
+    CityCreate, CityResponse,
     ZillowListingResponse,
     AirDNAInput, AirDNADataResponse,
     DiscrepancyResult,
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Zillow Arbitrage API",
     description="API for scraping Zillow rentals and analyzing arbitrage opportunities",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 # CORS for frontend
@@ -43,74 +43,84 @@ app.add_middleware(
 scrape_jobs = {}
 
 
-# ==================== Zip Code Endpoints ====================
+# ==================== City Endpoints ====================
 
-@app.get("/api/zip-codes", response_model=List[ZipCodeResponse])
-def get_zip_codes(db: Session = Depends(get_db)):
-    """Get all zip codes in the database."""
-    return db.query(ZipCode).all()
+@app.get("/api/cities", response_model=List[CityResponse])
+def get_cities(db: Session = Depends(get_db)):
+    """Get all cities in the database."""
+    return db.query(City).all()
 
 
-@app.post("/api/zip-codes", response_model=ZipCodeResponse)
-def create_zip_code(zip_code_data: ZipCodeCreate, db: Session = Depends(get_db)):
-    """Add a new zip code to track."""
-    existing = db.query(ZipCode).filter(ZipCode.zip_code == zip_code_data.zip_code).first()
+@app.post("/api/cities", response_model=CityResponse)
+def create_city(city_data: CityCreate, db: Session = Depends(get_db)):
+    """Add a new city to track."""
+    existing = db.query(City).filter(
+        City.city == city_data.city,
+        City.state == city_data.state
+    ).first()
     if existing:
         return existing
     
-    zip_code = ZipCode(**zip_code_data.model_dump())
-    db.add(zip_code)
+    city = City(**city_data.model_dump())
+    db.add(city)
     db.commit()
-    db.refresh(zip_code)
-    return zip_code
+    db.refresh(city)
+    return city
 
 
-@app.delete("/api/zip-codes/{zip_code}")
-def delete_zip_code(zip_code: str, db: Session = Depends(get_db)):
-    """Delete a zip code and all associated data."""
-    zip_obj = db.query(ZipCode).filter(ZipCode.zip_code == zip_code).first()
-    if not zip_obj:
-        raise HTTPException(status_code=404, detail="Zip code not found")
+@app.delete("/api/cities/{city}/{state}")
+def delete_city(city: str, state: str, db: Session = Depends(get_db)):
+    """Delete a city and all associated data."""
+    city_obj = db.query(City).filter(
+        City.city == city,
+        City.state == state
+    ).first()
+    if not city_obj:
+        raise HTTPException(status_code=404, detail="City not found")
     
     # Delete associated data
-    db.query(ZillowListing).filter(ZillowListing.zip_code_id == zip_obj.id).delete()
-    db.query(AirDNAData).filter(AirDNAData.zip_code_id == zip_obj.id).delete()
-    db.delete(zip_obj)
+    db.query(ZillowListing).filter(ZillowListing.city_id == city_obj.id).delete()
+    db.query(AirDNAData).filter(AirDNAData.city_id == city_obj.id).delete()
+    db.delete(city_obj)
     db.commit()
-    return {"message": f"Deleted zip code {zip_code} and all associated data"}
+    return {"message": f"Deleted {city}, {state} and all associated data"}
 
 
 # ==================== Scraping Endpoints ====================
 
-async def run_scrape_job(zip_code: str, min_bedrooms: int, max_bedrooms: int, db_session_factory):
+async def run_scrape_job(city: str, state: str, min_bedrooms: int, max_bedrooms: int, db_session_factory):
     """Background task to run scraping job."""
-    scrape_jobs[zip_code] = {"status": "running", "listings_found": 0, "message": "Scraping in progress..."}
+    job_key = f"{city}_{state}"
+    scrape_jobs[job_key] = {"status": "running", "listings_found": 0, "message": "Scraping in progress..."}
     
     try:
-        listings = await scrape_zillow(zip_code, min_bedrooms, max_bedrooms)
+        listings = await scrape_zillow(city, state, min_bedrooms, max_bedrooms)
         
-        # Save to database
         db = db_session_factory()
         try:
-            # Get or create zip code
-            zip_obj = db.query(ZipCode).filter(ZipCode.zip_code == zip_code).first()
-            if not zip_obj:
-                zip_obj = ZipCode(zip_code=zip_code)
-                db.add(zip_obj)
+            # Get or create city
+            city_obj = db.query(City).filter(
+                City.city == city,
+                City.state == state
+            ).first()
+            if not city_obj:
+                city_obj = City(city=city, state=state)
+                db.add(city_obj)
                 db.commit()
-                db.refresh(zip_obj)
+                db.refresh(city_obj)
             
-            # Clear old listings for this zip code
-            db.query(ZillowListing).filter(ZillowListing.zip_code_id == zip_obj.id).delete()
+            # Clear old listings
+            db.query(ZillowListing).filter(ZillowListing.city_id == city_obj.id).delete()
             
             # Add new listings
             for listing_data in listings:
                 listing = ZillowListing(
                     zillow_id=listing_data['zillow_id'],
-                    zip_code_id=zip_obj.id,
+                    city_id=city_obj.id,
                     address=listing_data['address'],
                     city=listing_data.get('city'),
                     state=listing_data.get('state'),
+                    zip_code=listing_data.get('zip_code'),
                     bedrooms=listing_data['bedrooms'],
                     bathrooms=listing_data.get('bathrooms'),
                     price=listing_data['price'],
@@ -118,14 +128,30 @@ async def run_scrape_job(zip_code: str, min_bedrooms: int, max_bedrooms: int, db
                     property_type=listing_data.get('property_type'),
                     sqft=listing_data.get('sqft'),
                     url=listing_data.get('url'),
+                    amenities_raw=listing_data.get('amenities_raw'),
+                    has_pool=listing_data.get('has_pool', False),
+                    has_waterview=listing_data.get('has_waterview', False),
+                    has_waterfront=listing_data.get('has_waterfront', False),
+                    has_basement=listing_data.get('has_basement', False),
+                    has_unfinished_basement=listing_data.get('has_unfinished_basement', False),
+                    has_finished_basement=listing_data.get('has_finished_basement', False),
+                    has_garage=listing_data.get('has_garage', False),
+                    has_parking=listing_data.get('has_parking', False),
+                    has_laundry=listing_data.get('has_laundry', False),
+                    has_ac=listing_data.get('has_ac', False),
+                    has_fireplace=listing_data.get('has_fireplace', False),
+                    has_yard=listing_data.get('has_yard', False),
+                    has_patio=listing_data.get('has_patio', False),
+                    has_balcony=listing_data.get('has_balcony', False),
+                    has_gym=listing_data.get('has_gym', False),
+                    has_pet_friendly=listing_data.get('has_pet_friendly', False),
                 )
                 db.add(listing)
             
-            # Update last scraped time
-            zip_obj.last_scraped = datetime.utcnow()
+            city_obj.last_scraped = datetime.utcnow()
             db.commit()
             
-            scrape_jobs[zip_code] = {
+            scrape_jobs[job_key] = {
                 "status": "completed",
                 "listings_found": len(listings),
                 "message": f"Successfully scraped {len(listings)} listings"
@@ -134,8 +160,8 @@ async def run_scrape_job(zip_code: str, min_bedrooms: int, max_bedrooms: int, db
             db.close()
             
     except Exception as e:
-        logger.error(f"Scraping error for {zip_code}: {e}")
-        scrape_jobs[zip_code] = {
+        logger.error(f"Scraping error for {city}, {state}: {e}")
+        scrape_jobs[job_key] = {
             "status": "failed",
             "listings_found": 0,
             "message": str(e)
@@ -144,47 +170,53 @@ async def run_scrape_job(zip_code: str, min_bedrooms: int, max_bedrooms: int, db
 
 @app.post("/api/scrape", response_model=ScrapeStatus)
 async def start_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Start a scraping job for a zip code."""
+    """Start a scraping job for a city."""
     from .database import SessionLocal
     
-    if request.zip_code in scrape_jobs and scrape_jobs[request.zip_code]["status"] == "running":
+    job_key = f"{request.city}_{request.state}"
+    if job_key in scrape_jobs and scrape_jobs[job_key]["status"] == "running":
         return ScrapeStatus(
-            zip_code=request.zip_code,
+            city=request.city,
+            state=request.state,
             status="running",
-            message="Scrape already in progress for this zip code"
+            message="Scrape already in progress"
         )
     
-    # Start background task
     background_tasks.add_task(
         run_scrape_job,
-        request.zip_code,
+        request.city,
+        request.state,
         request.min_bedrooms,
         request.max_bedrooms,
         SessionLocal
     )
     
-    scrape_jobs[request.zip_code] = {"status": "running", "listings_found": 0, "message": "Starting scrape..."}
+    scrape_jobs[job_key] = {"status": "running", "listings_found": 0, "message": "Starting scrape..."}
     
     return ScrapeStatus(
-        zip_code=request.zip_code,
+        city=request.city,
+        state=request.state,
         status="running",
         message="Scrape job started"
     )
 
 
-@app.get("/api/scrape/{zip_code}/status", response_model=ScrapeStatus)
-def get_scrape_status(zip_code: str):
+@app.get("/api/scrape/{city}/{state}/status", response_model=ScrapeStatus)
+def get_scrape_status(city: str, state: str):
     """Get the status of a scraping job."""
-    if zip_code not in scrape_jobs:
+    job_key = f"{city}_{state}"
+    if job_key not in scrape_jobs:
         return ScrapeStatus(
-            zip_code=zip_code,
+            city=city,
+            state=state,
             status="not_started",
-            message="No scrape job found for this zip code"
+            message="No scrape job found"
         )
     
-    job = scrape_jobs[zip_code]
+    job = scrape_jobs[job_key]
     return ScrapeStatus(
-        zip_code=zip_code,
+        city=city,
+        state=state,
         status=job["status"],
         listings_found=job.get("listings_found", 0),
         message=job.get("message", "")
@@ -195,49 +227,118 @@ def get_scrape_status(zip_code: str):
 
 @app.get("/api/listings", response_model=List[ZillowListingResponse])
 def get_listings(
-    zip_code: Optional[str] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
     bedrooms: Optional[int] = None,
+    min_bedrooms: Optional[int] = None,
+    max_bedrooms: Optional[int] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
+    # Amenity filters
+    has_pool: Optional[bool] = None,
+    has_waterview: Optional[bool] = None,
+    has_waterfront: Optional[bool] = None,
+    has_basement: Optional[bool] = None,
+    has_unfinished_basement: Optional[bool] = None,
+    has_finished_basement: Optional[bool] = None,
+    has_garage: Optional[bool] = None,
+    has_parking: Optional[bool] = None,
+    has_laundry: Optional[bool] = None,
+    has_ac: Optional[bool] = None,
+    has_fireplace: Optional[bool] = None,
+    has_yard: Optional[bool] = None,
+    has_patio: Optional[bool] = None,
+    has_balcony: Optional[bool] = None,
+    has_gym: Optional[bool] = None,
+    has_pet_friendly: Optional[bool] = None,
     limit: int = 100,
     offset: int = 0,
     db: Session = Depends(get_db)
 ):
-    """Get listings with optional filters."""
+    """Get listings with filters including bedroom count and amenities."""
     query = db.query(ZillowListing)
     
-    if zip_code:
-        zip_obj = db.query(ZipCode).filter(ZipCode.zip_code == zip_code).first()
-        if zip_obj:
-            query = query.filter(ZillowListing.zip_code_id == zip_obj.id)
+    # City filter
+    if city and state:
+        city_obj = db.query(City).filter(
+            City.city == city,
+            City.state == state
+        ).first()
+        if city_obj:
+            query = query.filter(ZillowListing.city_id == city_obj.id)
         else:
             return []
     
+    # Bedroom filters
     if bedrooms is not None:
         query = query.filter(ZillowListing.bedrooms == bedrooms)
+    if min_bedrooms is not None:
+        query = query.filter(ZillowListing.bedrooms >= min_bedrooms)
+    if max_bedrooms is not None:
+        query = query.filter(ZillowListing.bedrooms <= max_bedrooms)
     
+    # Price filters
     if min_price is not None:
         query = query.filter(ZillowListing.price >= min_price)
-    
     if max_price is not None:
         query = query.filter(ZillowListing.price <= max_price)
     
-    return query.offset(offset).limit(limit).all()
+    # Amenity filters (when True, require the amenity)
+    if has_pool is True:
+        query = query.filter(ZillowListing.has_pool == True)
+    if has_waterview is True:
+        query = query.filter(ZillowListing.has_waterview == True)
+    if has_waterfront is True:
+        query = query.filter(ZillowListing.has_waterfront == True)
+    if has_basement is True:
+        query = query.filter(ZillowListing.has_basement == True)
+    if has_unfinished_basement is True:
+        query = query.filter(ZillowListing.has_unfinished_basement == True)
+    if has_finished_basement is True:
+        query = query.filter(ZillowListing.has_finished_basement == True)
+    if has_garage is True:
+        query = query.filter(ZillowListing.has_garage == True)
+    if has_parking is True:
+        query = query.filter(ZillowListing.has_parking == True)
+    if has_laundry is True:
+        query = query.filter(ZillowListing.has_laundry == True)
+    if has_ac is True:
+        query = query.filter(ZillowListing.has_ac == True)
+    if has_fireplace is True:
+        query = query.filter(ZillowListing.has_fireplace == True)
+    if has_yard is True:
+        query = query.filter(ZillowListing.has_yard == True)
+    if has_patio is True:
+        query = query.filter(ZillowListing.has_patio == True)
+    if has_balcony is True:
+        query = query.filter(ZillowListing.has_balcony == True)
+    if has_gym is True:
+        query = query.filter(ZillowListing.has_gym == True)
+    if has_pet_friendly is True:
+        query = query.filter(ZillowListing.has_pet_friendly == True)
+    
+    return query.order_by(ZillowListing.price).offset(offset).limit(limit).all()
 
 
 @app.get("/api/listings/stats")
-def get_listing_stats(zip_code: Optional[str] = None, db: Session = Depends(get_db)):
+def get_listing_stats(
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """Get aggregate statistics for listings."""
     query = db.query(ZillowListing)
     
-    if zip_code:
-        zip_obj = db.query(ZipCode).filter(ZipCode.zip_code == zip_code).first()
-        if zip_obj:
-            query = query.filter(ZillowListing.zip_code_id == zip_obj.id)
+    if city and state:
+        city_obj = db.query(City).filter(
+            City.city == city,
+            City.state == state
+        ).first()
+        if city_obj:
+            query = query.filter(ZillowListing.city_id == city_obj.id)
         else:
-            return {"error": "Zip code not found"}
+            return {"error": "City not found"}
     
-    # Get stats by bedroom count
     stats = db.query(
         ZillowListing.bedrooms,
         func.count(ZillowListing.id).label('count'),
@@ -246,10 +347,13 @@ def get_listing_stats(zip_code: Optional[str] = None, db: Session = Depends(get_
         func.max(ZillowListing.price).label('max_price')
     )
     
-    if zip_code:
-        zip_obj = db.query(ZipCode).filter(ZipCode.zip_code == zip_code).first()
-        if zip_obj:
-            stats = stats.filter(ZillowListing.zip_code_id == zip_obj.id)
+    if city and state:
+        city_obj = db.query(City).filter(
+            City.city == city,
+            City.state == state
+        ).first()
+        if city_obj:
+            stats = stats.filter(ZillowListing.city_id == city_obj.id)
     
     stats = stats.group_by(ZillowListing.bedrooms).all()
     
@@ -265,24 +369,70 @@ def get_listing_stats(zip_code: Optional[str] = None, db: Session = Depends(get_
     ]
 
 
+@app.get("/api/listings/amenity-counts")
+def get_amenity_counts(
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    bedrooms: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """Get counts of listings with each amenity."""
+    query = db.query(ZillowListing)
+    
+    if city and state:
+        city_obj = db.query(City).filter(
+            City.city == city,
+            City.state == state
+        ).first()
+        if city_obj:
+            query = query.filter(ZillowListing.city_id == city_obj.id)
+    
+    if bedrooms is not None:
+        query = query.filter(ZillowListing.bedrooms == bedrooms)
+    
+    total = query.count()
+    
+    return {
+        "total": total,
+        "has_pool": query.filter(ZillowListing.has_pool == True).count(),
+        "has_waterview": query.filter(ZillowListing.has_waterview == True).count(),
+        "has_waterfront": query.filter(ZillowListing.has_waterfront == True).count(),
+        "has_basement": query.filter(ZillowListing.has_basement == True).count(),
+        "has_unfinished_basement": query.filter(ZillowListing.has_unfinished_basement == True).count(),
+        "has_finished_basement": query.filter(ZillowListing.has_finished_basement == True).count(),
+        "has_garage": query.filter(ZillowListing.has_garage == True).count(),
+        "has_parking": query.filter(ZillowListing.has_parking == True).count(),
+        "has_laundry": query.filter(ZillowListing.has_laundry == True).count(),
+        "has_ac": query.filter(ZillowListing.has_ac == True).count(),
+        "has_fireplace": query.filter(ZillowListing.has_fireplace == True).count(),
+        "has_yard": query.filter(ZillowListing.has_yard == True).count(),
+        "has_patio": query.filter(ZillowListing.has_patio == True).count(),
+        "has_balcony": query.filter(ZillowListing.has_balcony == True).count(),
+        "has_gym": query.filter(ZillowListing.has_gym == True).count(),
+        "has_pet_friendly": query.filter(ZillowListing.has_pet_friendly == True).count(),
+    }
+
+
 # ==================== AirDNA Endpoints ====================
 
 @app.post("/api/airdna", response_model=List[AirDNADataResponse])
 def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
-    """Save AirDNA data for a zip code."""
-    # Get or create zip code
-    zip_obj = db.query(ZipCode).filter(ZipCode.zip_code == data.zip_code).first()
-    if not zip_obj:
-        zip_obj = ZipCode(zip_code=data.zip_code)
-        db.add(zip_obj)
+    """Save AirDNA data for a city."""
+    # Get or create city
+    city_obj = db.query(City).filter(
+        City.city == data.city,
+        City.state == data.state
+    ).first()
+    if not city_obj:
+        city_obj = City(city=data.city, state=data.state)
+        db.add(city_obj)
         db.commit()
-        db.refresh(zip_obj)
+        db.refresh(city_obj)
     
     results = []
     for item in data.data:
-        # Update or create AirDNA data
         existing = db.query(AirDNAData).filter(
-            AirDNAData.zip_code_id == zip_obj.id,
+            AirDNAData.city_id == city_obj.id,
             AirDNAData.bedrooms == item.bedrooms
         ).first()
         
@@ -294,7 +444,7 @@ def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
             results.append(existing)
         else:
             airdna = AirDNAData(
-                zip_code_id=zip_obj.id,
+                city_id=city_obj.id,
                 bedrooms=item.bedrooms,
                 average_annual_revenue=item.average_annual_revenue
             )
@@ -306,61 +456,87 @@ def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
     return results
 
 
-@app.get("/api/airdna/{zip_code}", response_model=List[AirDNADataResponse])
-def get_airdna_data(zip_code: str, db: Session = Depends(get_db)):
-    """Get AirDNA data for a zip code."""
-    zip_obj = db.query(ZipCode).filter(ZipCode.zip_code == zip_code).first()
-    if not zip_obj:
+@app.get("/api/airdna/{city}/{state}", response_model=List[AirDNADataResponse])
+def get_airdna_data(city: str, state: str, db: Session = Depends(get_db)):
+    """Get AirDNA data for a city."""
+    city_obj = db.query(City).filter(
+        City.city == city,
+        City.state == state
+    ).first()
+    if not city_obj:
         return []
     
-    return db.query(AirDNAData).filter(AirDNAData.zip_code_id == zip_obj.id).all()
+    return db.query(AirDNAData).filter(AirDNAData.city_id == city_obj.id).all()
 
 
 # ==================== Analysis Endpoints ====================
 
 @app.get("/api/analysis/discrepancy", response_model=List[DiscrepancyResult])
 def get_discrepancy_analysis(
-    zip_code: Optional[str] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    bedrooms: Optional[int] = None,
     min_bedrooms: int = 3,
     max_bedrooms: int = 8,
+    # Amenity filters for analysis
+    has_pool: Optional[bool] = None,
+    has_waterview: Optional[bool] = None,
+    has_basement: Optional[bool] = None,
+    has_unfinished_basement: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
     """
     Analyze discrepancy between AirDNA revenue and rental prices.
-    Returns opportunities sorted by potential profit.
+    Can filter by amenities to find specific opportunities.
     """
     results = []
     
-    # Get zip codes to analyze
-    if zip_code:
-        zip_codes = db.query(ZipCode).filter(ZipCode.zip_code == zip_code).all()
+    # Get cities to analyze
+    if city and state:
+        cities = db.query(City).filter(
+            City.city == city,
+            City.state == state
+        ).all()
     else:
-        zip_codes = db.query(ZipCode).all()
+        cities = db.query(City).all()
     
-    for zip_obj in zip_codes:
-        # Get AirDNA data for this zip code
+    for city_obj in cities:
+        # Get AirDNA data
         airdna_data = {
             d.bedrooms: d.average_annual_revenue 
-            for d in db.query(AirDNAData).filter(AirDNAData.zip_code_id == zip_obj.id).all()
+            for d in db.query(AirDNAData).filter(AirDNAData.city_id == city_obj.id).all()
         }
         
         if not airdna_data:
             continue
         
-        for bedrooms in range(min_bedrooms, max_bedrooms + 1):
-            if bedrooms not in airdna_data:
+        bedroom_range = [bedrooms] if bedrooms else range(min_bedrooms, max_bedrooms + 1)
+        
+        for br in bedroom_range:
+            if br not in airdna_data:
                 continue
             
-            # Get listings for this bedroom count
-            listings = db.query(ZillowListing).filter(
-                ZillowListing.zip_code_id == zip_obj.id,
-                ZillowListing.bedrooms == bedrooms
-            ).order_by(ZillowListing.price).all()
+            # Build query with amenity filters
+            query = db.query(ZillowListing).filter(
+                ZillowListing.city_id == city_obj.id,
+                ZillowListing.bedrooms == br
+            )
+            
+            # Apply amenity filters
+            if has_pool is True:
+                query = query.filter(ZillowListing.has_pool == True)
+            if has_waterview is True:
+                query = query.filter(ZillowListing.has_waterview == True)
+            if has_basement is True:
+                query = query.filter(ZillowListing.has_basement == True)
+            if has_unfinished_basement is True:
+                query = query.filter(ZillowListing.has_unfinished_basement == True)
+            
+            listings = query.order_by(ZillowListing.price).all()
             
             if not listings:
                 continue
             
-            # Calculate statistics
             prices = [l.price for l in listings]
             avg_price = sum(prices) / len(prices)
             
@@ -369,10 +545,9 @@ def get_discrepancy_analysis(
             bottom_prices = sorted(prices)[:bottom_count]
             bottom_avg = sum(bottom_prices) / len(bottom_prices)
             
-            airdna_annual = airdna_data[bedrooms]
+            airdna_annual = airdna_data[br]
             airdna_monthly = airdna_annual / 12
             
-            # Calculate profits
             annual_rent_avg = avg_price * 12
             annual_rent_bottom = bottom_avg * 12
             
@@ -383,10 +558,9 @@ def get_discrepancy_analysis(
             roi_vs_bottom = (profit_vs_bottom / annual_rent_bottom * 100) if annual_rent_bottom > 0 else 0
             
             results.append(DiscrepancyResult(
-                zip_code=zip_obj.zip_code,
-                city=zip_obj.city,
-                state=zip_obj.state,
-                bedrooms=bedrooms,
+                city=city_obj.city,
+                state=city_obj.state,
+                bedrooms=br,
                 airdna_annual_revenue=airdna_annual,
                 airdna_monthly_revenue=round(airdna_monthly, 2),
                 avg_rental_price=round(avg_price, 2),
@@ -398,9 +572,7 @@ def get_discrepancy_analysis(
                 roi_vs_bottom=round(roi_vs_bottom, 2),
             ))
     
-    # Sort by profit vs bottom 10% (best opportunities first)
     results.sort(key=lambda x: x.annual_profit_vs_bottom, reverse=True)
-    
     return results
 
 

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { BarChart3, Home } from 'lucide-react';
-import ZipCodeManager from '@/components/ZipCodeManager';
+import CityManager from '@/components/CityManager';
 import AirDNAInput from '@/components/AirDNAInput';
 import DiscrepancyTable from '@/components/DiscrepancyTable';
 import ListingsTable from '@/components/ListingsTable';
@@ -46,9 +46,9 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Top Section: Zip Codes & AirDNA Input */}
+        {/* Top Section: Cities & AirDNA Input */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <ZipCodeManager onZipCodeChange={handleDataChange} />
+          <CityManager onCityChange={handleDataChange} />
           <AirDNAInput onDataSaved={handleDataChange} />
         </div>
 
@@ -82,7 +82,7 @@ export default function Dashboard() {
       <footer className="bg-white border-t border-gray-200 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <p className="text-center text-sm text-gray-500">
-            Zillow Arbitrage Tool • Compare Zillow rentals with AirDNA revenue data
+            Zillow Arbitrage Tool - Compare rentals with AirDNA revenue data
           </p>
         </div>
       </footer>

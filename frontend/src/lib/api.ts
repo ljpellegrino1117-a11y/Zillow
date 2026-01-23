@@ -2,11 +2,10 @@ import axios from 'axios';
 
 const API_BASE = '/api';
 
-export interface ZipCode {
+export interface City {
   id: number;
-  zip_code: string;
-  city: string | null;
-  state: string | null;
+  city: string;
+  state: string;
   created_at: string;
   last_scraped: string | null;
 }
@@ -14,10 +13,11 @@ export interface ZipCode {
 export interface ZillowListing {
   id: number;
   zillow_id: string;
-  zip_code_id: number;
+  city_id: number;
   address: string;
   city: string | null;
   state: string | null;
+  zip_code: string | null;
   bedrooms: number;
   bathrooms: number | null;
   price: number;
@@ -25,21 +25,37 @@ export interface ZillowListing {
   property_type: string | null;
   sqft: number | null;
   url: string | null;
+  amenities_raw: string | null;
+  has_pool: boolean;
+  has_waterview: boolean;
+  has_waterfront: boolean;
+  has_basement: boolean;
+  has_unfinished_basement: boolean;
+  has_finished_basement: boolean;
+  has_garage: boolean;
+  has_parking: boolean;
+  has_laundry: boolean;
+  has_ac: boolean;
+  has_fireplace: boolean;
+  has_yard: boolean;
+  has_patio: boolean;
+  has_balcony: boolean;
+  has_gym: boolean;
+  has_pet_friendly: boolean;
   scraped_at: string;
 }
 
 export interface AirDNAData {
   id: number;
-  zip_code_id: number;
+  city_id: number;
   bedrooms: number;
   average_annual_revenue: number;
   updated_at: string;
 }
 
 export interface DiscrepancyResult {
-  zip_code: string;
-  city: string | null;
-  state: string | null;
+  city: string;
+  state: string;
   bedrooms: number;
   airdna_annual_revenue: number;
   airdna_monthly_revenue: number;
@@ -53,7 +69,8 @@ export interface DiscrepancyResult {
 }
 
 export interface ScrapeStatus {
-  zip_code: string;
+  city: string;
+  state: string;
   status: string;
   listings_found: number;
   message: string;
@@ -67,54 +84,91 @@ export interface ListingStats {
   max_price: number | null;
 }
 
-// Zip Code API
-export const getZipCodes = async (): Promise<ZipCode[]> => {
-  const response = await axios.get(`${API_BASE}/zip-codes`);
+export interface AmenityFilters {
+  has_pool?: boolean;
+  has_waterview?: boolean;
+  has_waterfront?: boolean;
+  has_basement?: boolean;
+  has_unfinished_basement?: boolean;
+  has_finished_basement?: boolean;
+  has_garage?: boolean;
+  has_parking?: boolean;
+  has_laundry?: boolean;
+  has_ac?: boolean;
+  has_fireplace?: boolean;
+  has_yard?: boolean;
+  has_patio?: boolean;
+  has_balcony?: boolean;
+  has_gym?: boolean;
+  has_pet_friendly?: boolean;
+}
+
+export interface AmenityCounts extends AmenityFilters {
+  total: number;
+}
+
+// City API
+export const getCities = async (): Promise<City[]> => {
+  const response = await axios.get(`${API_BASE}/cities`);
   return response.data;
 };
 
-export const createZipCode = async (zipCode: string, city?: string, state?: string): Promise<ZipCode> => {
-  const response = await axios.post(`${API_BASE}/zip-codes`, {
-    zip_code: zipCode,
-    city,
-    state,
-  });
+export const createCity = async (city: string, state: string): Promise<City> => {
+  const response = await axios.post(`${API_BASE}/cities`, { city, state });
   return response.data;
 };
 
-export const deleteZipCode = async (zipCode: string): Promise<void> => {
-  await axios.delete(`${API_BASE}/zip-codes/${zipCode}`);
+export const deleteCity = async (city: string, state: string): Promise<void> => {
+  await axios.delete(`${API_BASE}/cities/${encodeURIComponent(city)}/${encodeURIComponent(state)}`);
 };
 
 // Scraping API
-export const startScrape = async (zipCode: string, minBedrooms = 3, maxBedrooms = 8): Promise<ScrapeStatus> => {
+export const startScrape = async (city: string, state: string, minBedrooms = 3, maxBedrooms = 8): Promise<ScrapeStatus> => {
   const response = await axios.post(`${API_BASE}/scrape`, {
-    zip_code: zipCode,
+    city,
+    state,
     min_bedrooms: minBedrooms,
     max_bedrooms: maxBedrooms,
   });
   return response.data;
 };
 
-export const getScrapeStatus = async (zipCode: string): Promise<ScrapeStatus> => {
-  const response = await axios.get(`${API_BASE}/scrape/${zipCode}/status`);
+export const getScrapeStatus = async (city: string, state: string): Promise<ScrapeStatus> => {
+  const response = await axios.get(`${API_BASE}/scrape/${encodeURIComponent(city)}/${encodeURIComponent(state)}/status`);
   return response.data;
 };
 
 // Listings API
 export const getListings = async (
-  zipCode?: string,
+  city?: string,
+  state?: string,
   bedrooms?: number,
+  minBedrooms?: number,
+  maxBedrooms?: number,
   minPrice?: number,
   maxPrice?: number,
+  amenityFilters?: AmenityFilters,
   limit = 100,
   offset = 0
 ): Promise<ZillowListing[]> => {
   const params = new URLSearchParams();
-  if (zipCode) params.append('zip_code', zipCode);
+  if (city) params.append('city', city);
+  if (state) params.append('state', state);
   if (bedrooms !== undefined) params.append('bedrooms', bedrooms.toString());
+  if (minBedrooms !== undefined) params.append('min_bedrooms', minBedrooms.toString());
+  if (maxBedrooms !== undefined) params.append('max_bedrooms', maxBedrooms.toString());
   if (minPrice !== undefined) params.append('min_price', minPrice.toString());
   if (maxPrice !== undefined) params.append('max_price', maxPrice.toString());
+  
+  // Add amenity filters
+  if (amenityFilters) {
+    Object.entries(amenityFilters).forEach(([key, value]) => {
+      if (value === true) {
+        params.append(key, 'true');
+      }
+    });
+  }
+  
   params.append('limit', limit.toString());
   params.append('offset', offset.toString());
   
@@ -122,39 +176,61 @@ export const getListings = async (
   return response.data;
 };
 
-export const getListingStats = async (zipCode?: string): Promise<ListingStats[]> => {
-  const params = zipCode ? `?zip_code=${zipCode}` : '';
-  const response = await axios.get(`${API_BASE}/listings/stats${params}`);
+export const getListingStats = async (city?: string, state?: string): Promise<ListingStats[]> => {
+  const params = new URLSearchParams();
+  if (city) params.append('city', city);
+  if (state) params.append('state', state);
+  const response = await axios.get(`${API_BASE}/listings/stats?${params.toString()}`);
+  return response.data;
+};
+
+export const getAmenityCounts = async (city?: string, state?: string, bedrooms?: number): Promise<AmenityCounts> => {
+  const params = new URLSearchParams();
+  if (city) params.append('city', city);
+  if (state) params.append('state', state);
+  if (bedrooms !== undefined) params.append('bedrooms', bedrooms.toString());
+  const response = await axios.get(`${API_BASE}/listings/amenity-counts?${params.toString()}`);
   return response.data;
 };
 
 // AirDNA API
 export const saveAirDNAData = async (
-  zipCode: string,
+  city: string,
+  state: string,
   data: Array<{ bedrooms: number; average_annual_revenue: number }>
 ): Promise<AirDNAData[]> => {
-  const response = await axios.post(`${API_BASE}/airdna`, {
-    zip_code: zipCode,
-    data,
-  });
+  const response = await axios.post(`${API_BASE}/airdna`, { city, state, data });
   return response.data;
 };
 
-export const getAirDNAData = async (zipCode: string): Promise<AirDNAData[]> => {
-  const response = await axios.get(`${API_BASE}/airdna/${zipCode}`);
+export const getAirDNAData = async (city: string, state: string): Promise<AirDNAData[]> => {
+  const response = await axios.get(`${API_BASE}/airdna/${encodeURIComponent(city)}/${encodeURIComponent(state)}`);
   return response.data;
 };
 
 // Analysis API
 export const getDiscrepancyAnalysis = async (
-  zipCode?: string,
+  city?: string,
+  state?: string,
+  bedrooms?: number,
   minBedrooms = 3,
-  maxBedrooms = 8
+  maxBedrooms = 8,
+  amenityFilters?: AmenityFilters
 ): Promise<DiscrepancyResult[]> => {
   const params = new URLSearchParams();
-  if (zipCode) params.append('zip_code', zipCode);
+  if (city) params.append('city', city);
+  if (state) params.append('state', state);
+  if (bedrooms !== undefined) params.append('bedrooms', bedrooms.toString());
   params.append('min_bedrooms', minBedrooms.toString());
   params.append('max_bedrooms', maxBedrooms.toString());
+  
+  if (amenityFilters) {
+    Object.entries(amenityFilters).forEach(([key, value]) => {
+      if (value === true) {
+        params.append(key, 'true');
+      }
+    });
+  }
   
   const response = await axios.get(`${API_BASE}/analysis/discrepancy?${params.toString()}`);
   return response.data;

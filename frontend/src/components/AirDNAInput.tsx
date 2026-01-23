@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Save, DollarSign, Loader2, Check } from 'lucide-react';
-import { getZipCodes, getAirDNAData, saveAirDNAData, ZipCode, AirDNAData } from '@/lib/api';
+import { getCities, getAirDNAData, saveAirDNAData, City, AirDNAData } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 
 interface Props {
@@ -12,8 +12,9 @@ interface Props {
 const BEDROOM_COUNTS = [3, 4, 5, 6, 7, 8];
 
 export default function AirDNAInput({ onDataSaved }: Props) {
-  const [zipCodes, setZipCodes] = useState<ZipCode[]>([]);
-  const [selectedZipCode, setSelectedZipCode] = useState<string>('');
+  const [cities, setCities] = useState<City[]>([]);
+  const [selectedCity, setSelectedCity] = useState<string>('');
+  const [selectedState, setSelectedState] = useState<string>('');
   const [revenues, setRevenues] = useState<Record<number, string>>({});
   const [existingData, setExistingData] = useState<AirDNAData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -21,30 +22,30 @@ export default function AirDNAInput({ onDataSaved }: Props) {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const fetchZipCodes = async () => {
+    const fetchCities = async () => {
       try {
-        const data = await getZipCodes();
-        setZipCodes(data);
-        if (data.length > 0 && !selectedZipCode) {
-          setSelectedZipCode(data[0].zip_code);
+        const data = await getCities();
+        setCities(data);
+        if (data.length > 0 && !selectedCity) {
+          setSelectedCity(data[0].city);
+          setSelectedState(data[0].state);
         }
       } catch (error) {
-        console.error('Failed to fetch zip codes:', error);
+        console.error('Failed to fetch cities:', error);
       }
     };
-    fetchZipCodes();
-  }, [selectedZipCode]);
+    fetchCities();
+  }, [selectedCity]);
 
   useEffect(() => {
     const fetchAirDNAData = async () => {
-      if (!selectedZipCode) return;
+      if (!selectedCity || !selectedState) return;
       
       setLoading(true);
       try {
-        const data = await getAirDNAData(selectedZipCode);
+        const data = await getAirDNAData(selectedCity, selectedState);
         setExistingData(data);
         
-        // Pre-fill form with existing data
         const revenueMap: Record<number, string> = {};
         data.forEach(d => {
           revenueMap[d.bedrooms] = d.average_annual_revenue.toString();
@@ -58,17 +59,23 @@ export default function AirDNAInput({ onDataSaved }: Props) {
       }
     };
     fetchAirDNAData();
-  }, [selectedZipCode]);
+  }, [selectedCity, selectedState]);
+
+  const handleCitySelect = (value: string) => {
+    const [city, state] = value.split('|');
+    setSelectedCity(city);
+    setSelectedState(state);
+    setSaved(false);
+  };
 
   const handleRevenueChange = (bedrooms: number, value: string) => {
-    // Allow only numbers and empty string
     const cleaned = value.replace(/[^\d]/g, '');
     setRevenues(prev => ({ ...prev, [bedrooms]: cleaned }));
     setSaved(false);
   };
 
   const handleSave = async () => {
-    if (!selectedZipCode) return;
+    if (!selectedCity || !selectedState) return;
 
     const data = BEDROOM_COUNTS
       .filter(br => revenues[br] && parseInt(revenues[br]) > 0)
@@ -84,12 +91,11 @@ export default function AirDNAInput({ onDataSaved }: Props) {
 
     setSaving(true);
     try {
-      await saveAirDNAData(selectedZipCode, data);
+      await saveAirDNAData(selectedCity, selectedState, data);
       setSaved(true);
       onDataSaved?.();
       
-      // Refresh existing data
-      const newData = await getAirDNAData(selectedZipCode);
+      const newData = await getAirDNAData(selectedCity, selectedState);
       setExistingData(newData);
     } catch (error) {
       console.error('Failed to save AirDNA data:', error);
@@ -112,28 +118,28 @@ export default function AirDNAInput({ onDataSaved }: Props) {
       </h2>
 
       <p className="text-sm text-gray-600 mb-4">
-        Enter the average annual revenue from AirDNA for each bedroom count in the selected zip code.
-        This data will be used to calculate arbitrage opportunities.
+        Enter the average annual revenue from AirDNA for each bedroom count.
+        This will be used to calculate arbitrage opportunities.
       </p>
 
-      {/* Zip code selector */}
+      {/* City selector */}
       <div className="mb-6">
-        <label className="input-label">Select Zip Code</label>
+        <label className="input-label">Select City</label>
         <select
-          value={selectedZipCode}
-          onChange={(e) => setSelectedZipCode(e.target.value)}
+          value={selectedCity && selectedState ? `${selectedCity}|${selectedState}` : ''}
+          onChange={(e) => handleCitySelect(e.target.value)}
           className="input"
         >
-          <option value="">Select a zip code...</option>
-          {zipCodes.map(zip => (
-            <option key={zip.id} value={zip.zip_code}>
-              {zip.zip_code} {zip.city && zip.state ? `- ${zip.city}, ${zip.state}` : ''}
+          <option value="">Select a city...</option>
+          {cities.map(c => (
+            <option key={c.id} value={`${c.city}|${c.state}`}>
+              {c.city}, {c.state}
             </option>
           ))}
         </select>
       </div>
 
-      {selectedZipCode && (
+      {selectedCity && selectedState && (
         <>
           {loading ? (
             <div className="flex items-center justify-center py-8">
@@ -148,7 +154,7 @@ export default function AirDNAInput({ onDataSaved }: Props) {
                   return (
                     <div key={bedrooms}>
                       <label className="input-label">
-                        {bedrooms} Bedroom{bedrooms > 1 ? 's' : ''}
+                        {bedrooms} BR
                       </label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
@@ -160,14 +166,9 @@ export default function AirDNAInput({ onDataSaved }: Props) {
                           className="input pl-7"
                         />
                       </div>
-                      {existingValue !== null && !revenues[bedrooms] && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          Current: {formatCurrency(existingValue)}
-                        </p>
-                      )}
                       {revenues[bedrooms] && parseInt(revenues[bedrooms]) > 0 && (
                         <p className="text-xs text-gray-500 mt-1">
-                          Monthly: {formatCurrency(parseInt(revenues[bedrooms]) / 12)}
+                          {formatCurrency(parseInt(revenues[bedrooms]) / 12)}/mo
                         </p>
                       )}
                     </div>
@@ -211,9 +212,9 @@ export default function AirDNAInput({ onDataSaved }: Props) {
         </>
       )}
 
-      {zipCodes.length === 0 && (
+      {cities.length === 0 && (
         <div className="text-center py-8 text-gray-500">
-          No zip codes available. Add a zip code first to enter AirDNA data.
+          No cities available. Add a city first to enter AirDNA data.
         </div>
       )}
     </div>

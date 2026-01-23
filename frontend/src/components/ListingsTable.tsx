@@ -1,31 +1,38 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Building2, ExternalLink, Loader2 } from 'lucide-react';
-import { getListings, getZipCodes, ZillowListing, ZipCode } from '@/lib/api';
+import { Building2, ExternalLink, Loader2, Filter } from 'lucide-react';
+import { getListings, getCities, getAmenityCounts, ZillowListing, City, AmenityFilters, AmenityCounts } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
+import AmenityFilter from './AmenityFilter';
 
 interface Props {
   refreshTrigger?: number;
 }
 
+const BEDROOM_OPTIONS = [3, 4, 5, 6, 7, 8];
+
 export default function ListingsTable({ refreshTrigger }: Props) {
   const [listings, setListings] = useState<ZillowListing[]>([]);
-  const [zipCodes, setZipCodes] = useState<ZipCode[]>([]);
-  const [selectedZipCode, setSelectedZipCode] = useState<string>('');
-  const [selectedBedrooms, setSelectedBedrooms] = useState<string>('');
+  const [cities, setCities] = useState<City[]>([]);
+  const [selectedCity, setSelectedCity] = useState<string>('');
+  const [selectedState, setSelectedState] = useState<string>('');
+  const [selectedBedrooms, setSelectedBedrooms] = useState<number | undefined>(undefined);
+  const [amenityFilters, setAmenityFilters] = useState<AmenityFilters>({});
+  const [amenityCounts, setAmenityCounts] = useState<AmenityCounts | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
-    const fetchZipCodes = async () => {
+    const fetchCities = async () => {
       try {
-        const data = await getZipCodes();
-        setZipCodes(data);
+        const data = await getCities();
+        setCities(data);
       } catch (error) {
-        console.error('Failed to fetch zip codes:', error);
+        console.error('Failed to fetch cities:', error);
       }
     };
-    fetchZipCodes();
+    fetchCities();
   }, [refreshTrigger]);
 
   useEffect(() => {
@@ -33,10 +40,14 @@ export default function ListingsTable({ refreshTrigger }: Props) {
       setLoading(true);
       try {
         const data = await getListings(
-          selectedZipCode || undefined,
-          selectedBedrooms ? parseInt(selectedBedrooms) : undefined,
+          selectedCity || undefined,
+          selectedState || undefined,
+          selectedBedrooms,
           undefined,
           undefined,
+          undefined,
+          undefined,
+          amenityFilters,
           100
         );
         setListings(data);
@@ -47,7 +58,48 @@ export default function ListingsTable({ refreshTrigger }: Props) {
       }
     };
     fetchListings();
-  }, [selectedZipCode, selectedBedrooms, refreshTrigger]);
+  }, [selectedCity, selectedState, selectedBedrooms, amenityFilters, refreshTrigger]);
+
+  useEffect(() => {
+    const fetchCounts = async () => {
+      try {
+        const counts = await getAmenityCounts(
+          selectedCity || undefined,
+          selectedState || undefined,
+          selectedBedrooms
+        );
+        setAmenityCounts(counts);
+      } catch (error) {
+        console.error('Failed to fetch amenity counts:', error);
+      }
+    };
+    fetchCounts();
+  }, [selectedCity, selectedState, selectedBedrooms, refreshTrigger]);
+
+  const handleCitySelect = (value: string) => {
+    if (!value) {
+      setSelectedCity('');
+      setSelectedState('');
+    } else {
+      const [city, state] = value.split('|');
+      setSelectedCity(city);
+      setSelectedState(state);
+    }
+  };
+
+  const getAmenityBadges = (listing: ZillowListing) => {
+    const badges = [];
+    if (listing.has_pool) badges.push({ label: 'Pool', icon: '🏊' });
+    if (listing.has_waterview) badges.push({ label: 'Water View', icon: '🌊' });
+    if (listing.has_waterfront) badges.push({ label: 'Waterfront', icon: '🏖️' });
+    if (listing.has_unfinished_basement) badges.push({ label: 'Unfin. Basement', icon: '🏚️' });
+    if (listing.has_finished_basement) badges.push({ label: 'Fin. Basement', icon: '🏠' });
+    if (listing.has_garage) badges.push({ label: 'Garage', icon: '🚗' });
+    if (listing.has_yard) badges.push({ label: 'Yard', icon: '🌳' });
+    return badges;
+  };
+
+  const activeFilterCount = Object.values(amenityFilters).filter(Boolean).length;
 
   return (
     <div className="card">
@@ -57,35 +109,60 @@ export default function ListingsTable({ refreshTrigger }: Props) {
       </h2>
 
       {/* Filters */}
-      <div className="flex gap-4 mb-4">
-        <div className="w-48">
-          <label className="input-label">Zip Code</label>
-          <select
-            value={selectedZipCode}
-            onChange={(e) => setSelectedZipCode(e.target.value)}
-            className="input"
-          >
-            <option value="">All zip codes</option>
-            {zipCodes.map(zip => (
-              <option key={zip.id} value={zip.zip_code}>
-                {zip.zip_code}
-              </option>
-            ))}
-          </select>
+      <div className="space-y-4 mb-4">
+        <div className="flex flex-wrap gap-4">
+          <div className="w-48">
+            <label className="input-label">City</label>
+            <select
+              value={selectedCity && selectedState ? `${selectedCity}|${selectedState}` : ''}
+              onChange={(e) => handleCitySelect(e.target.value)}
+              className="input"
+            >
+              <option value="">All cities</option>
+              {cities.map(c => (
+                <option key={c.id} value={`${c.city}|${c.state}`}>
+                  {c.city}, {c.state}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="w-40">
+            <label className="input-label">Bedrooms</label>
+            <select
+              value={selectedBedrooms ?? ''}
+              onChange={(e) => setSelectedBedrooms(e.target.value ? parseInt(e.target.value) : undefined)}
+              className="input"
+            >
+              <option value="">All</option>
+              {BEDROOM_OPTIONS.map(br => (
+                <option key={br} value={br}>{br} BR</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`btn ${showFilters || activeFilterCount > 0 ? 'btn-primary' : 'btn-secondary'}`}
+            >
+              <Filter className="h-4 w-4" />
+              Amenities
+              {activeFilterCount > 0 && (
+                <span className="ml-1 bg-white/20 px-1.5 py-0.5 rounded text-xs">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
-        <div className="w-40">
-          <label className="input-label">Bedrooms</label>
-          <select
-            value={selectedBedrooms}
-            onChange={(e) => setSelectedBedrooms(e.target.value)}
-            className="input"
-          >
-            <option value="">All</option>
-            {[3, 4, 5, 6, 7, 8].map(br => (
-              <option key={br} value={br}>{br} BR</option>
-            ))}
-          </select>
-        </div>
+
+        {/* Amenity Filters */}
+        {showFilters && (
+          <AmenityFilter
+            filters={amenityFilters}
+            onChange={setAmenityFilters}
+            counts={amenityCounts || undefined}
+          />
+        )}
       </div>
 
       {loading ? (
@@ -95,11 +172,11 @@ export default function ListingsTable({ refreshTrigger }: Props) {
       ) : listings.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
           <p>No listings found.</p>
-          <p className="text-sm mt-1">Scrape a zip code to see listings here.</p>
+          <p className="text-sm mt-1">Scrape a city to see listings here.</p>
         </div>
       ) : (
         <>
-          <div className="table-container max-h-96 overflow-y-auto">
+          <div className="table-container max-h-[500px] overflow-y-auto">
             <table>
               <thead className="sticky top-0">
                 <tr>
@@ -107,7 +184,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                   <th>BR</th>
                   <th>BA</th>
                   <th>Price</th>
-                  <th>Type</th>
+                  <th>Amenities</th>
                   <th>SqFt</th>
                   <th></th>
                 </tr>
@@ -116,19 +193,32 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                 {listings.map((listing) => (
                   <tr key={listing.id}>
                     <td>
-                      <div className="max-w-xs truncate" title={listing.address}>
+                      <div className="max-w-xs truncate font-medium" title={listing.address}>
                         {listing.address}
                       </div>
                       {listing.city && (
                         <div className="text-xs text-gray-500">
-                          {listing.city}, {listing.state}
+                          {listing.city}, {listing.state} {listing.zip_code}
                         </div>
                       )}
                     </td>
-                    <td>{listing.bedrooms}</td>
+                    <td className="font-medium">{listing.bedrooms}</td>
                     <td>{listing.bathrooms || '—'}</td>
-                    <td className="font-medium">{formatCurrency(listing.price)}/mo</td>
-                    <td className="text-gray-600">{listing.property_type || '—'}</td>
+                    <td className="font-semibold text-green-600">{formatCurrency(listing.price)}/mo</td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        {getAmenityBadges(listing).slice(0, 3).map((badge, i) => (
+                          <span key={i} className="text-xs bg-gray-100 px-1.5 py-0.5 rounded" title={badge.label}>
+                            {badge.icon}
+                          </span>
+                        ))}
+                        {getAmenityBadges(listing).length > 3 && (
+                          <span className="text-xs text-gray-400">
+                            +{getAmenityBadges(listing).length - 3}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="text-gray-600">
                       {listing.sqft ? listing.sqft.toLocaleString() : '—'}
                     </td>
@@ -151,6 +241,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
           </div>
           <div className="mt-4 text-sm text-gray-500">
             Showing {listings.length} listing{listings.length !== 1 ? 's' : ''}
+            {amenityCounts && ` of ${amenityCounts.total} total`}
           </div>
         </>
       )}

@@ -15,7 +15,6 @@ import asyncio
 import re
 import json
 import os
-import time
 from typing import List, Dict, Any, Optional, Callable
 import httpx
 from bs4 import BeautifulSoup
@@ -31,6 +30,105 @@ logger = logging.getLogger(__name__)
 # Get API key from environment variable
 SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "")
 SCRAPER_API_URL = "https://api.scraperapi.com/"
+
+
+# Amenity detection patterns
+AMENITY_PATTERNS = {
+    'has_pool': [
+        r'\bpool\b', r'\bswimming\b', r'\bswim\b'
+    ],
+    'has_waterview': [
+        r'\bwater\s*view\b', r'\bwaterview\b', r'\bocean\s*view\b', r'\blake\s*view\b',
+        r'\briver\s*view\b', r'\bbay\s*view\b', r'\bsea\s*view\b', r'\bbeach\s*view\b'
+    ],
+    'has_waterfront': [
+        r'\bwaterfront\b', r'\bwater\s*front\b', r'\boceanfront\b', r'\blakefront\b',
+        r'\briverfront\b', r'\bbeachfront\b', r'\bbayfront\b'
+    ],
+    'has_basement': [
+        r'\bbasement\b'
+    ],
+    'has_unfinished_basement': [
+        r'\bunfinished\s*basement\b', r'\bbasement\s*unfinished\b',
+        r'\bpartially\s*finished\s*basement\b', r'\braw\s*basement\b'
+    ],
+    'has_finished_basement': [
+        r'\bfinished\s*basement\b', r'\bbasement\s*finished\b',
+        r'\bfully\s*finished\s*basement\b', r'\bcompleted\s*basement\b'
+    ],
+    'has_garage': [
+        r'\bgarage\b', r'\bcar\s*garage\b', r'\bparking\s*garage\b'
+    ],
+    'has_parking': [
+        r'\bparking\b', r'\bdriveway\b', r'\bcarport\b', r'\bcar\s*port\b'
+    ],
+    'has_laundry': [
+        r'\blaundry\b', r'\bwasher\b', r'\bdryer\b', r'\bw/d\b', r'\bwasher/dryer\b'
+    ],
+    'has_ac': [
+        r'\ba/?c\b', r'\bair\s*condition', r'\bcentral\s*air\b', r'\bcooling\b', r'\bhvac\b'
+    ],
+    'has_fireplace': [
+        r'\bfireplace\b', r'\bfire\s*place\b', r'\bwood\s*burning\b'
+    ],
+    'has_yard': [
+        r'\byard\b', r'\bbackyard\b', r'\bback\s*yard\b', r'\bfront\s*yard\b', 
+        r'\bfenced\s*yard\b', r'\bprivate\s*yard\b'
+    ],
+    'has_patio': [
+        r'\bpatio\b', r'\bdeck\b', r'\bterrace\b', r'\boutdoor\s*space\b'
+    ],
+    'has_balcony': [
+        r'\bbalcony\b', r'\bbalconies\b'
+    ],
+    'has_gym': [
+        r'\bgym\b', r'\bfitness\b', r'\bexercise\s*room\b', r'\bworkout\b'
+    ],
+    'has_pet_friendly': [
+        r'\bpet\s*friendly\b', r'\bpets\s*allowed\b', r'\bpets\s*ok\b',
+        r'\bdog\s*friendly\b', r'\bcat\s*friendly\b', r'\bpets\s*welcome\b'
+    ],
+}
+
+
+def detect_amenities(description: str, amenities_list: List[str] = None) -> Dict[str, bool]:
+    """
+    Detect amenities from description text and amenities list.
+    
+    Args:
+        description: Property description text
+        amenities_list: List of amenities from the listing
+        
+    Returns:
+        Dict of amenity flags
+    """
+    # Combine description and amenities into one searchable text
+    text_parts = []
+    if description:
+        text_parts.append(description)
+    if amenities_list:
+        text_parts.extend(amenities_list)
+    
+    combined_text = ' '.join(text_parts).lower()
+    
+    results = {}
+    for amenity_key, patterns in AMENITY_PATTERNS.items():
+        found = False
+        for pattern in patterns:
+            if re.search(pattern, combined_text, re.IGNORECASE):
+                found = True
+                break
+        results[amenity_key] = found
+    
+    # Special logic: if basement is found but neither finished nor unfinished specified
+    # it could be either, so we just mark has_basement
+    if results.get('has_basement'):
+        # If unfinished patterns found, mark unfinished
+        # If finished patterns found, mark finished
+        # has_basement stays true either way
+        pass
+    
+    return results
 
 
 class ZillowScraperAPI:
@@ -49,11 +147,6 @@ class ZillowScraperAPI:
         api_key: Optional[str] = None,
         on_listing_found: Optional[Callable[[Dict], None]] = None
     ):
-        """
-        Args:
-            api_key: ScraperAPI key (defaults to SCRAPER_API_KEY env var)
-            on_listing_found: Optional callback for each listing found
-        """
         self.api_key = api_key or SCRAPER_API_KEY
         if not self.api_key:
             raise ValueError(
@@ -71,9 +164,13 @@ class ZillowScraperAPI:
         if self.client:
             await self.client.aclose()
     
-    def _build_zillow_url(self, zip_code: str, bedrooms: int, page: int = 1) -> str:
-        """Build Zillow rental search URL."""
-        base = f"https://www.zillow.com/{zip_code}/rentals/"
+    def _build_zillow_url(self, city: str, state: str, bedrooms: int, page: int = 1) -> str:
+        """Build Zillow rental search URL for a city."""
+        # Format: city-state (e.g., "chicago-il", "miami-fl")
+        city_slug = city.lower().replace(' ', '-')
+        state_slug = state.lower()
+        
+        base = f"https://www.zillow.com/{city_slug}-{state_slug}/rentals/"
         if bedrooms:
             base += f"{bedrooms}-bedrooms/"
         if page > 1:
@@ -81,14 +178,7 @@ class ZillowScraperAPI:
         return base
     
     async def _fetch_page(self, url: str, max_retries: int = 3) -> Optional[str]:
-        """
-        Fetch a page using ScraperAPI.
-        
-        ScraperAPI parameters:
-        - render=true: Execute JavaScript (required for Zillow)
-        - country_code=us: Use US proxies
-        - premium=true: Use premium proxies for better success rate
-        """
+        """Fetch a page using ScraperAPI."""
         params = {
             "api_key": self.api_key,
             "url": url,
@@ -109,10 +199,10 @@ class ZillowScraperAPI:
                 if response.status_code == 200:
                     return response.text
                 elif response.status_code == 403:
-                    logger.warning(f"  Access denied (403). Page may be blocked.")
+                    logger.warning(f"  Access denied (403)")
                     return None
                 elif response.status_code == 429:
-                    logger.warning(f"  Rate limited (429). Waiting before retry...")
+                    logger.warning(f"  Rate limited (429). Waiting...")
                     await asyncio.sleep(5 * (attempt + 1))
                 elif response.status_code == 500:
                     logger.warning(f"  Server error (500). Retrying...")
@@ -129,13 +219,12 @@ class ZillowScraperAPI:
         
         return None
     
-    def _extract_listings_from_html(self, html: str) -> List[Dict[str, Any]]:
+    def _extract_listings_from_html(self, html: str, city: str, state: str) -> List[Dict[str, Any]]:
         """Extract listing data from Zillow HTML."""
         listings = []
         soup = BeautifulSoup(html, 'lxml')
         
-        # METHOD 1: Parse JSON data from script tags
-        # Zillow embeds listing data in <script type="application/json"> tags
+        # METHOD 1: Parse JSON from script tags
         script_tags = soup.find_all('script', type='application/json')
         
         for script in script_tags:
@@ -144,25 +233,25 @@ class ZillowScraperAPI:
             try:
                 data = json.loads(script.string)
                 if isinstance(data, dict):
-                    found = self._parse_json_data(data)
+                    found = self._parse_json_data(data, city, state)
                     listings.extend(found)
             except (json.JSONDecodeError, TypeError):
                 continue
         
-        # METHOD 2: Parse __NEXT_DATA__ (Next.js)
+        # METHOD 2: Parse __NEXT_DATA__
         next_data = soup.find('script', id='__NEXT_DATA__')
         if next_data and next_data.string:
             try:
                 data = json.loads(next_data.string)
                 props = data.get('props', {}).get('pageProps', {})
-                found = self._parse_json_data(props)
+                found = self._parse_json_data(props, city, state)
                 listings.extend(found)
             except (json.JSONDecodeError, TypeError):
                 pass
         
-        # METHOD 3: Parse HTML property cards (fallback)
+        # METHOD 3: Parse HTML cards (fallback)
         if not listings:
-            listings = self._parse_html_cards(soup)
+            listings = self._parse_html_cards(soup, city, state)
         
         # Deduplicate by zillow_id
         seen = set()
@@ -175,21 +264,19 @@ class ZillowScraperAPI:
         
         return unique
     
-    def _parse_json_data(self, data: Dict, depth: int = 0) -> List[Dict[str, Any]]:
+    def _parse_json_data(self, data: Dict, city: str, state: str, depth: int = 0) -> List[Dict[str, Any]]:
         """Recursively search for listing data in JSON."""
         if depth > 15:
             return []
         
         listings = []
         
-        # Check if this looks like a listing object
         if self._is_listing_object(data):
-            listing = self._extract_listing(data)
+            listing = self._extract_listing(data, city, state)
             if listing:
                 listings.append(listing)
                 return listings
         
-        # Search in common keys
         search_keys = [
             'searchResults', 'listResults', 'results', 'mapResults',
             'cat1', 'searchPageState', 'homes', 'properties', 'listings'
@@ -201,20 +288,19 @@ class ZillowScraperAPI:
                 if isinstance(value, list):
                     for item in value:
                         if isinstance(item, dict):
-                            listings.extend(self._parse_json_data(item, depth + 1))
+                            listings.extend(self._parse_json_data(item, city, state, depth + 1))
                 elif isinstance(value, dict):
-                    listings.extend(self._parse_json_data(value, depth + 1))
+                    listings.extend(self._parse_json_data(value, city, state, depth + 1))
         
-        # Recurse into other keys
         for key, value in data.items():
             if key in search_keys:
                 continue
             if isinstance(value, dict):
-                listings.extend(self._parse_json_data(value, depth + 1))
+                listings.extend(self._parse_json_data(value, city, state, depth + 1))
             elif isinstance(value, list) and len(value) < 100:
                 for item in value:
                     if isinstance(item, dict):
-                        listings.extend(self._parse_json_data(item, depth + 1))
+                        listings.extend(self._parse_json_data(item, city, state, depth + 1))
         
         return listings
     
@@ -225,10 +311,9 @@ class ZillowScraperAPI:
         has_price = any(k in data for k in ['price', 'unformattedPrice', 'rent'])
         return has_id and (has_address or has_price)
     
-    def _extract_listing(self, data: Dict) -> Optional[Dict[str, Any]]:
+    def _extract_listing(self, data: Dict, search_city: str, search_state: str) -> Optional[Dict[str, Any]]:
         """Extract listing details from a JSON object."""
         try:
-            # Get ID
             zpid = data.get('zpid') or data.get('id') or data.get('propertyId')
             if not zpid:
                 return None
@@ -237,20 +322,22 @@ class ZillowScraperAPI:
             addr = data.get('address', {})
             if isinstance(addr, str):
                 address = addr
-                city, state = None, None
+                city, state, zip_code = search_city, search_state, None
             elif isinstance(addr, dict):
                 address = addr.get('streetAddress', '') or addr.get('line1', '')
-                city = addr.get('city', '')
-                state = addr.get('state', '')
+                city = addr.get('city', '') or search_city
+                state = addr.get('state', '') or search_state
+                zip_code = addr.get('zipcode', '') or addr.get('postalCode', '')
             else:
                 address = data.get('streetAddress', '') or data.get('formattedAddress', '')
-                city = data.get('city', '')
-                state = data.get('state', '')
+                city = data.get('city', '') or search_city
+                state = data.get('state', '') or search_state
+                zip_code = data.get('zipcode', '') or data.get('postalCode', '')
             
             if not address:
                 return None
             
-            # Get price (prefer actual price over estimates)
+            # Get price
             price = None
             for field in ['price', 'unformattedPrice', 'rent', 'rentPrice', 'listPrice']:
                 if field in data and data[field]:
@@ -267,7 +354,6 @@ class ZillowScraperAPI:
                             except ValueError:
                                 continue
             
-            # Fallback to rentZestimate (estimate, not actual price)
             if not price and 'rentZestimate' in data:
                 val = data['rentZestimate']
                 if isinstance(val, (int, float)) and val > 0:
@@ -292,11 +378,26 @@ class ZillowScraperAPI:
             if len(desc) > 5000:
                 desc = desc[:5000] + '...'
             
-            return {
+            # Get amenities from listing data
+            amenities_list = []
+            amenity_fields = ['amenities', 'features', 'homeFeatures', 'propertyFeatures', 'highlights']
+            for field in amenity_fields:
+                if field in data:
+                    val = data[field]
+                    if isinstance(val, list):
+                        amenities_list.extend([str(a) for a in val])
+                    elif isinstance(val, str):
+                        amenities_list.append(val)
+            
+            # Detect amenities
+            detected = detect_amenities(desc, amenities_list)
+            
+            listing = {
                 'zillow_id': str(zpid),
                 'address': address.strip(),
-                'city': city.strip() if city else None,
-                'state': state.strip() if state else None,
+                'city': city.strip() if city else search_city,
+                'state': state.strip() if state else search_state,
+                'zip_code': zip_code.strip() if zip_code else None,
                 'bedrooms': int(beds) if beds else 0,
                 'bathrooms': float(baths) if baths else None,
                 'price': price,
@@ -304,21 +405,25 @@ class ZillowScraperAPI:
                 'property_type': data.get('propertyType') or data.get('homeType', ''),
                 'sqft': data.get('livingArea') or data.get('sqft'),
                 'url': f"https://www.zillow.com/homedetails/{zpid}_zpid/",
+                'amenities_raw': json.dumps(amenities_list) if amenities_list else None,
             }
+            
+            # Add detected amenities
+            listing.update(detected)
+            
+            return listing
         except Exception as e:
             logger.error(f"Error extracting listing: {e}")
             return None
     
-    def _parse_html_cards(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    def _parse_html_cards(self, soup: BeautifulSoup, city: str, state: str) -> List[Dict[str, Any]]:
         """Parse listing cards from HTML (fallback method)."""
         listings = []
         
-        # Try different selectors
         selectors = [
             'article[data-test="property-card"]',
             'li[class*="ListItem"]',
             '[class*="property-card"]',
-            '[class*="StyledPropertyCard"]',
         ]
         
         cards = []
@@ -329,7 +434,6 @@ class ZillowScraperAPI:
         
         for card in cards:
             try:
-                # Get URL and zpid
                 link = card.find('a', href=True)
                 url = link['href'] if link else None
                 zpid = None
@@ -340,11 +444,9 @@ class ZillowScraperAPI:
                     if not url.startswith('http'):
                         url = f"https://www.zillow.com{url}"
                 
-                # Get address
                 addr_el = card.select_one('[data-test="property-card-addr"]') or card.select_one('address')
                 address = addr_el.get_text(strip=True) if addr_el else None
                 
-                # Get price
                 price_el = card.select_one('[data-test="property-card-price"]') or card.select_one('[class*="price"]')
                 price = None
                 if price_el:
@@ -353,7 +455,6 @@ class ZillowScraperAPI:
                     if nums:
                         price = float(nums[0].replace(',', ''))
                 
-                # Get beds/baths from card text
                 card_text = card.get_text()
                 beds_m = re.search(r'(\d+)\s*(?:bd|bed)', card_text, re.I)
                 baths_m = re.search(r'([\d.]+)\s*(?:ba|bath)', card_text, re.I)
@@ -361,11 +462,15 @@ class ZillowScraperAPI:
                 baths = float(baths_m.group(1)) if baths_m else None
                 
                 if address and price:
-                    listings.append({
+                    # Basic amenity detection from card text
+                    detected = detect_amenities(card_text, [])
+                    
+                    listing = {
                         'zillow_id': zpid or f"html_{hash(address) % 10000000}",
                         'address': address,
-                        'city': None,
-                        'state': None,
+                        'city': city,
+                        'state': state,
+                        'zip_code': None,
                         'bedrooms': beds,
                         'bathrooms': baths,
                         'price': price,
@@ -373,7 +478,10 @@ class ZillowScraperAPI:
                         'property_type': None,
                         'sqft': None,
                         'url': url,
-                    })
+                        'amenities_raw': None,
+                    }
+                    listing.update(detected)
+                    listings.append(listing)
             except Exception as e:
                 logger.error(f"Error parsing card: {e}")
                 continue
@@ -388,37 +496,28 @@ class ZillowScraperAPI:
     
     def _get_page_count(self, soup: BeautifulSoup) -> int:
         """Get total number of pages from pagination."""
-        # Look for pagination elements
-        for sel in ['[class*="pagination"] a', '[class*="PaginationNumberButton"]', 'nav[aria-label="pagination"] a']:
+        for sel in ['[class*="pagination"] a', '[class*="PaginationNumberButton"]']:
             elems = soup.select(sel)
             if elems:
                 pages = [int(e.get_text(strip=True)) for e in elems if e.get_text(strip=True).isdigit()]
                 if pages:
-                    return min(max(pages), 20)  # Cap at 20
-        
-        # Look for result count
-        for sel in ['[class*="result-count"]', '[class*="ResultCount"]']:
-            elem = soup.select_one(sel)
-            if elem:
-                m = re.search(r'([\d,]+)\s*(?:result|home|rental)', elem.get_text(), re.I)
-                if m:
-                    total = int(m.group(1).replace(',', ''))
-                    return min((total // 40) + 1, 20)
-        
+                    return min(max(pages), 20)
         return 1
     
-    async def scrape_zip_code(
+    async def scrape_city(
         self,
-        zip_code: str,
+        city: str,
+        state: str,
         min_bedrooms: int = 3,
         max_bedrooms: int = 8,
         max_pages_per_bedroom: int = 10
     ) -> List[Dict[str, Any]]:
         """
-        Scrape all rental listings for a zip code.
+        Scrape all rental listings for a city.
         
         Args:
-            zip_code: The zip code to scrape
+            city: City name (e.g., "Chicago", "Miami")
+            state: State abbreviation (e.g., "IL", "FL")
             min_bedrooms: Minimum bedroom count (default 3)
             max_bedrooms: Maximum bedroom count (default 8)
             max_pages_per_bedroom: Max pages per bedroom count
@@ -430,13 +529,13 @@ class ZillowScraperAPI:
         seen_ids = set()
         
         for bedrooms in range(min_bedrooms, max_bedrooms + 1):
-            logger.info(f"Scraping {zip_code} - {bedrooms} bedrooms...")
+            logger.info(f"Scraping {city}, {state} - {bedrooms} bedrooms...")
             
             page = 1
             empty_pages = 0
             
             while page <= max_pages_per_bedroom:
-                url = self._build_zillow_url(zip_code, bedrooms, page)
+                url = self._build_zillow_url(city, state, bedrooms, page)
                 html = await self._fetch_page(url)
                 
                 if not html:
@@ -447,7 +546,7 @@ class ZillowScraperAPI:
                     logger.info(f"  No results for {bedrooms} BR")
                     break
                 
-                listings = self._extract_listings_from_html(html)
+                listings = self._extract_listings_from_html(html, city, state)
                 
                 if not listings:
                     empty_pages += 1
@@ -464,11 +563,9 @@ class ZillowScraperAPI:
                 for listing in listings:
                     lid = listing.get('zillow_id')
                     if lid and lid not in seen_ids:
-                        # Set bedroom count if not extracted
                         if not listing.get('bedrooms'):
                             listing['bedrooms'] = bedrooms
                         
-                        # Only include matching bedroom count
                         if listing['bedrooms'] == bedrooms or listing['bedrooms'] == 0:
                             if listing['bedrooms'] == 0:
                                 listing['bedrooms'] = bedrooms
@@ -490,23 +587,23 @@ class ZillowScraperAPI:
                     if empty_pages >= 2:
                         break
                 
-                # Check pagination
                 soup = BeautifulSoup(html, 'lxml')
                 total_pages = self._get_page_count(soup)
                 if page >= total_pages:
                     break
                 
                 page += 1
-                await asyncio.sleep(1)  # Rate limiting
+                await asyncio.sleep(1)
             
-            await asyncio.sleep(2)  # Pause between bedroom counts
+            await asyncio.sleep(2)
         
-        logger.info(f"Total: {len(all_listings)} listings for {zip_code}")
+        logger.info(f"Total: {len(all_listings)} listings for {city}, {state}")
         return all_listings
 
 
 async def scrape_zillow(
-    zip_code: str,
+    city: str,
+    state: str,
     min_bedrooms: int = 3,
     max_bedrooms: int = 8,
     api_key: Optional[str] = None,
@@ -516,17 +613,18 @@ async def scrape_zillow(
     Main entry point for scraping Zillow.
     
     Args:
-        zip_code: Zip code to scrape
+        city: City name
+        state: State abbreviation
         min_bedrooms: Min bedroom count
         max_bedrooms: Max bedroom count
-        api_key: ScraperAPI key (optional, uses env var if not provided)
-        on_listing_found: Optional callback for each listing
+        api_key: ScraperAPI key (optional)
+        on_listing_found: Optional callback
         
     Returns:
         List of listing dictionaries
     """
     async with ZillowScraperAPI(api_key=api_key, on_listing_found=on_listing_found) as scraper:
-        return await scraper.scrape_zip_code(zip_code, min_bedrooms, max_bedrooms)
+        return await scraper.scrape_city(city, state, min_bedrooms, max_bedrooms)
 
 
 # CLI for testing
@@ -534,39 +632,39 @@ if __name__ == "__main__":
     import sys
     
     async def main():
-        zip_code = sys.argv[1] if len(sys.argv) > 1 else "60601"
+        city = sys.argv[1] if len(sys.argv) > 1 else "Chicago"
+        state = sys.argv[2] if len(sys.argv) > 2 else "IL"
         
         print(f"\n{'='*60}")
-        print(f"Scraping Zillow rentals for {zip_code}")
-        print(f"Using ScraperAPI")
+        print(f"Scraping Zillow rentals for {city}, {state}")
         print(f"{'='*60}\n")
         
         def on_found(listing):
-            print(f"  + {listing['bedrooms']}BR ${listing['price']:,.0f}/mo - {listing['address'][:50]}")
+            amenities = []
+            if listing.get('has_pool'): amenities.append('Pool')
+            if listing.get('has_waterview'): amenities.append('Waterview')
+            if listing.get('has_basement'): amenities.append('Basement')
+            am_str = f" [{', '.join(amenities)}]" if amenities else ""
+            print(f"  + {listing['bedrooms']}BR ${listing['price']:,.0f}/mo{am_str} - {listing['address'][:40]}")
         
         try:
-            listings = await scrape_zillow(zip_code, on_listing_found=on_found)
+            listings = await scrape_zillow(city, state, on_listing_found=on_found)
         except ValueError as e:
             print(f"ERROR: {e}")
-            print("\nTo fix this:")
-            print("  1. Sign up at https://www.scraperapi.com (free tier available)")
-            print("  2. Set your API key: export SCRAPER_API_KEY='your_key_here'")
             return
         
         print(f"\n{'='*60}")
-        print(f"RESULTS: {len(listings)} listings in {zip_code}")
+        print(f"RESULTS: {len(listings)} listings in {city}, {state}")
         print(f"{'='*60}")
         
-        # Summary by bedroom
-        by_br = {}
-        for l in listings:
-            br = l['bedrooms']
-            by_br.setdefault(br, []).append(l)
+        # Summary
+        pools = sum(1 for l in listings if l.get('has_pool'))
+        waterviews = sum(1 for l in listings if l.get('has_waterview'))
+        basements = sum(1 for l in listings if l.get('has_basement'))
         
-        for br in sorted(by_br.keys()):
-            prices = [l['price'] for l in by_br[br]]
-            print(f"\n{br} BR: {len(by_br[br])} listings")
-            print(f"  Range: ${min(prices):,.0f} - ${max(prices):,.0f}")
-            print(f"  Avg:   ${sum(prices)/len(prices):,.0f}")
+        print(f"\nAmenity counts:")
+        print(f"  Pool: {pools}")
+        print(f"  Waterview: {waterviews}")
+        print(f"  Basement: {basements}")
     
     asyncio.run(main())
