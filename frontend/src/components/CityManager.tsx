@@ -31,7 +31,7 @@ export default function CityManager({ onCityChange }: Props) {
   const [newState, setNewState] = useState('');
   const [newZipCode, setNewZipCode] = useState('');
   const [includeSurrounding, setIncludeSurrounding] = useState(false);
-  const [surroundingMiles, setSurroundingMiles] = useState<number>(25);
+  const [surroundingMiles, setSurroundingMiles] = useState<number | string>(25);
   const [surroundingOnly, setSurroundingOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [scrapeStatuses, setScrapeStatuses] = useState<Record<string, ScrapeStatus>>({});
@@ -91,7 +91,7 @@ export default function CityManager({ onCityChange }: Props) {
         state: newState.trim(),
         zipCode: newZipCode.trim() || undefined,
         includeSurrounding,
-        surroundingMiles: includeSurrounding ? surroundingMiles : undefined,
+        surroundingMiles: includeSurrounding ? (Number(surroundingMiles) || 25) : undefined,
         surroundingOnly: includeSurrounding ? surroundingOnly : false
       });
       setNewCity('');
@@ -270,7 +270,23 @@ export default function CityManager({ onCityChange }: Props) {
               <input
                 type="number"
                 value={surroundingMiles}
-                onChange={(e) => setSurroundingMiles(Math.max(1, Math.min(100, parseInt(e.target.value) || 25)))}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '') {
+                    setSurroundingMiles('');
+                  } else {
+                    const num = parseInt(val);
+                    if (!isNaN(num)) {
+                      setSurroundingMiles(Math.max(1, Math.min(100, num)));
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  // Reset to default if empty when leaving field
+                  if (surroundingMiles === '' || surroundingMiles === 0) {
+                    setSurroundingMiles(25);
+                  }
+                }}
                 disabled={!includeSurrounding}
                 className="input w-20 text-center"
                 min={1}
@@ -298,8 +314,8 @@ export default function CityManager({ onCityChange }: Props) {
           {includeSurrounding && (
             <p className="text-xs text-gray-500 mt-2">
               {surroundingOnly 
-                ? `Will search cities within ${surroundingMiles} miles, but NOT include ${newCity || 'the main city'} itself.`
-                : `Will search ${newCity || 'the main city'} AND surrounding cities within ${surroundingMiles} miles.`
+                ? `Will search cities within ${surroundingMiles || 25} miles, but NOT include ${newCity || 'the main city'} itself.`
+                : `Will search ${newCity || 'the main city'} AND surrounding cities within ${surroundingMiles || 25} miles.`
               }
             </p>
           )}
