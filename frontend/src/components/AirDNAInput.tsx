@@ -41,6 +41,7 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
   const [bedroomsMin, setBedroomsMin] = useState<number>(3);
   const [bedroomsMax, setBedroomsMax] = useState<number>(3);
   const [revenue, setRevenue] = useState<string>('');
+  const [revenueType, setRevenueType] = useState<'annual' | 'monthly'>('annual');
   // Tri-state amenities: true = WITH, false = WITHOUT, undefined = ANY (not set)
   const [selectedAmenities, setSelectedAmenities] = useState<Record<string, AmenityState>>({});
   const [showAmenities, setShowAmenities] = useState(false);
@@ -133,13 +134,18 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
         }
       });
 
+      // Convert monthly to annual if needed (backend always stores annual)
+      const annualRevenue = revenueType === 'monthly' 
+        ? parseInt(revenue) * 12 
+        : parseInt(revenue);
+
       await saveAirDNAData({
         city: selectedCity,
         state: selectedState,
         zipCode: zipCode || undefined,
         bedroomsMin,
         bedroomsMax,
-        averageAnnualRevenue: parseInt(revenue),
+        averageAnnualRevenue: annualRevenue,
         amenities: Object.keys(amenities).length > 0 ? amenities : undefined
       });
       
@@ -278,7 +284,7 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
               Add Revenue Entry
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
               {/* Bedroom Range */}
               <div>
                 <label className="input-label">Bedrooms Min</label>
@@ -311,21 +317,55 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
               </div>
 
               {/* Revenue */}
-              <div>
-                <label className="input-label">Annual Revenue *</label>
+              <div className="md:col-span-2">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="input-label mb-0">Revenue *</label>
+                  <div className="flex bg-gray-100 rounded-lg p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setRevenueType('monthly')}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                        revenueType === 'monthly'
+                          ? 'bg-white text-primary-700 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      Monthly
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRevenueType('annual')}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                        revenueType === 'annual'
+                          ? 'bg-white text-primary-700 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      Annual
+                    </button>
+                  </div>
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
                   <input
                     type="text"
                     value={revenue}
                     onChange={(e) => setRevenue(e.target.value.replace(/[^\d]/g, ''))}
-                    placeholder="e.g., 65000"
+                    placeholder={revenueType === 'monthly' ? 'e.g., 5500' : 'e.g., 65000'}
                     className="input pl-7"
                   />
                 </div>
                 {revenue && parseInt(revenue) > 0 && (
                   <p className="text-xs text-green-600 mt-1">
-                    {formatCurrency(parseInt(revenue) / 12)}/mo
+                    {revenueType === 'monthly' ? (
+                      <>
+                        {formatCurrency(parseInt(revenue))}/mo = <strong>{formatCurrency(parseInt(revenue) * 12)}/yr</strong>
+                      </>
+                    ) : (
+                      <>
+                        {formatCurrency(parseInt(revenue))}/yr = {formatCurrency(parseInt(revenue) / 12)}/mo
+                      </>
+                    )}
                   </p>
                 )}
               </div>
