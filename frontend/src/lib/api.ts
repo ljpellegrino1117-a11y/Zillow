@@ -71,12 +71,39 @@ export interface ZillowListing {
   scraped_at: string;
 }
 
+export interface AirDNAAmenities {
+  has_pool?: boolean;
+  has_waterfront?: boolean;
+  has_waterview?: boolean;
+  has_basement?: boolean;
+  has_garage?: boolean;
+  has_yard?: boolean;
+  has_pet_friendly?: boolean;
+  has_office?: boolean;
+  has_den?: boolean;
+  has_loft?: boolean;
+  has_mother_in_law?: boolean;
+}
+
 export interface AirDNAData {
   id: number;
   city_id: number;
   zip_code: string | null;
-  bedrooms: number;
+  bedrooms_min: number;
+  bedrooms_max: number;
   average_annual_revenue: number;
+  amenity_filter: string | null;
+  has_pool: boolean;
+  has_waterfront: boolean;
+  has_waterview: boolean;
+  has_basement: boolean;
+  has_garage: boolean;
+  has_yard: boolean;
+  has_pet_friendly: boolean;
+  has_office: boolean;
+  has_den: boolean;
+  has_loft: boolean;
+  has_mother_in_law: boolean;
   updated_at: string;
 }
 
@@ -261,19 +288,31 @@ export const getAmenityCounts = async (city?: string, state?: string, bedrooms?:
 };
 
 // AirDNA API
-export const saveAirDNAData = async (
-  city: string,
-  state: string,
-  data: Array<{ bedrooms: number; average_annual_revenue: number }>,
-  zipCode?: string
-): Promise<AirDNAData[]> => {
+export interface SaveAirDNAParams {
+  city: string;
+  state: string;
+  zipCode?: string;
+  bedroomsMin: number;
+  bedroomsMax: number;
+  averageAnnualRevenue: number;
+  amenities?: AirDNAAmenities;
+}
+
+export const saveAirDNAData = async (params: SaveAirDNAParams): Promise<AirDNAData> => {
   const response = await axios.post(`${API_BASE}/airdna`, { 
-    city, 
-    state, 
-    zip_code: zipCode || null,
-    data 
+    city: params.city, 
+    state: params.state, 
+    zip_code: params.zipCode || null,
+    bedrooms_min: params.bedroomsMin,
+    bedrooms_max: params.bedroomsMax,
+    average_annual_revenue: params.averageAnnualRevenue,
+    amenities: params.amenities || null
   });
   return response.data;
+};
+
+export const deleteAirDNAData = async (id: number): Promise<void> => {
+  await axios.delete(`${API_BASE}/airdna/${id}`);
 };
 
 export const getAirDNAData = async (city: string, state: string, zipCode?: string): Promise<AirDNAData[]> => {

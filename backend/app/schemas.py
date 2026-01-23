@@ -112,15 +112,47 @@ class ZillowListingResponse(ZillowListingBase):
 
 
 # AirDNA Schemas
+class AirDNAAmenities(BaseModel):
+    """Amenity filters for AirDNA data"""
+    has_pool: bool = False
+    has_waterfront: bool = False
+    has_waterview: bool = False
+    has_basement: bool = False
+    has_garage: bool = False
+    has_yard: bool = False
+    has_pet_friendly: bool = False
+    has_office: bool = False
+    has_den: bool = False
+    has_loft: bool = False
+    has_mother_in_law: bool = False
+
+
 class AirDNADataBase(BaseModel):
-    bedrooms: int
+    bedrooms_min: int
+    bedrooms_max: int
     average_annual_revenue: float
+    amenities: Optional[AirDNAAmenities] = None
 
 
-class AirDNADataResponse(AirDNADataBase):
+class AirDNADataResponse(BaseModel):
     id: int
     city_id: int
     zip_code: Optional[str] = None
+    bedrooms_min: int
+    bedrooms_max: int
+    average_annual_revenue: float
+    amenity_filter: Optional[str] = None
+    has_pool: bool = False
+    has_waterfront: bool = False
+    has_waterview: bool = False
+    has_basement: bool = False
+    has_garage: bool = False
+    has_yard: bool = False
+    has_pet_friendly: bool = False
+    has_office: bool = False
+    has_den: bool = False
+    has_loft: bool = False
+    has_mother_in_law: bool = False
     updated_at: datetime
 
     class Config:
@@ -128,11 +160,14 @@ class AirDNADataResponse(AirDNADataBase):
 
 
 class AirDNAInput(BaseModel):
-    """Input schema for adding AirDNA data for a city (optionally with zip code)"""
+    """Input schema for adding AirDNA data for a city"""
     city: str
     state: str
     zip_code: Optional[str] = None  # Optional zip code for granular data
-    data: List[AirDNADataBase]
+    bedrooms_min: int
+    bedrooms_max: int
+    average_annual_revenue: float
+    amenities: Optional[AirDNAAmenities] = None
 
 
 # Discrepancy Analysis Schemas

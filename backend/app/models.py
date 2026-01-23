@@ -102,12 +102,28 @@ class AirDNAData(Base):
     id = Column(Integer, primary_key=True, index=True)
     city_id = Column(Integer, ForeignKey("cities.id"), nullable=False)
     zip_code = Column(String(10), nullable=True, index=True)  # Optional zip code for granular data
-    bedrooms = Column(Integer, nullable=False)
+    bedrooms_min = Column(Integer, nullable=False)  # Min bedrooms (or exact if max is same)
+    bedrooms_max = Column(Integer, nullable=False)  # Max bedrooms (or exact if same as min)
     average_annual_revenue = Column(Float, nullable=False)  # Annual revenue from AirDNA
+    
+    # Amenity filters - when set, this revenue applies to listings with these amenities
+    amenity_filter = Column(Text, nullable=True)  # JSON string of required amenities
+    has_pool = Column(Boolean, default=False)
+    has_waterfront = Column(Boolean, default=False)
+    has_waterview = Column(Boolean, default=False)
+    has_basement = Column(Boolean, default=False)
+    has_garage = Column(Boolean, default=False)
+    has_yard = Column(Boolean, default=False)
+    has_pet_friendly = Column(Boolean, default=False)
+    # Extra rooms
+    has_office = Column(Boolean, default=False)
+    has_den = Column(Boolean, default=False)
+    has_loft = Column(Boolean, default=False)
+    has_mother_in_law = Column(Boolean, default=False)
+    
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    __table_args__ = (
-        UniqueConstraint('city_id', 'zip_code', 'bedrooms', name='unique_city_zip_bedroom'),
-    )
+    # Note: We use a more flexible approach - no strict unique constraint
+    # Multiple entries can exist for same city/bedrooms with different amenities
 
     city_rel = relationship("City", back_populates="airdna_data")

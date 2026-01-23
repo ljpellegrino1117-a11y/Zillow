@@ -1,27 +1,45 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Save, DollarSign, Loader2, Check, Plus, X } from 'lucide-react';
-import { getCities, getAirDNAData, saveAirDNAData, getAirDNAZipCodes, City, AirDNAData } from '@/lib/api';
+import { Save, DollarSign, Loader2, Check, Trash2, Plus, X } from 'lucide-react';
+import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, City, AirDNAData, AirDNAAmenities } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 
 interface Props {
   onDataSaved?: () => void;
 }
 
-const BEDROOM_COUNTS = [3, 4, 5, 6, 7, 8];
+const BEDROOM_OPTIONS = [3, 4, 5, 6, 7, 8];
+
+const AMENITY_OPTIONS = [
+  { key: 'has_pool', label: 'Pool', icon: '🏊' },
+  { key: 'has_waterfront', label: 'Waterfront', icon: '🏖️' },
+  { key: 'has_waterview', label: 'Water View', icon: '🌊' },
+  { key: 'has_basement', label: 'Basement', icon: '⬇️' },
+  { key: 'has_garage', label: 'Garage', icon: '🚗' },
+  { key: 'has_yard', label: 'Yard', icon: '🌳' },
+  { key: 'has_pet_friendly', label: 'Pet Friendly', icon: '🐕' },
+  { key: 'has_office', label: 'Office', icon: '💼' },
+  { key: 'has_den', label: 'Den/Study', icon: '📚' },
+  { key: 'has_loft', label: 'Loft', icon: '🏠' },
+  { key: 'has_mother_in_law', label: 'In-Law Suite', icon: '🏘️' },
+];
 
 export default function AirDNAInput({ onDataSaved }: Props) {
   const [cities, setCities] = useState<City[]>([]);
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [selectedState, setSelectedState] = useState<string>('');
   const [zipCode, setZipCode] = useState<string>('');
-  const [existingZipCodes, setExistingZipCodes] = useState<(string | null)[]>([]);
-  const [revenues, setRevenues] = useState<Record<number, string>>({});
   const [existingData, setExistingData] = useState<AirDNAData[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  
+  // New entry form
+  const [bedroomsMin, setBedroomsMin] = useState<number>(3);
+  const [bedroomsMax, setBedroomsMax] = useState<number>(3);
+  const [revenue, setRevenue] = useState<string>('');
+  const [selectedAmenities, setSelectedAmenities] = useState<Record<string, boolean>>({});
+  const [showAmenities, setShowAmenities] = useState(false);
 
   // Fetch cities on mount
   useEffect(() => {
@@ -40,99 +58,78 @@ export default function AirDNAInput({ onDataSaved }: Props) {
     fetchCities();
   }, [selectedCity]);
 
-  // Fetch existing zip codes when city changes
-  useEffect(() => {
-    const fetchZipCodes = async () => {
-      if (!selectedCity || !selectedState) return;
-      
-      try {
-        const zips = await getAirDNAZipCodes(selectedCity, selectedState);
-        setExistingZipCodes(zips);
-      } catch (error) {
-        console.error('Failed to fetch zip codes:', error);
-        setExistingZipCodes([]);
-      }
-    };
-    fetchZipCodes();
-  }, [selectedCity, selectedState]);
-
-  // Fetch AirDNA data when city or zip changes
+  // Fetch AirDNA data when city changes
   useEffect(() => {
     const fetchAirDNAData = async () => {
       if (!selectedCity || !selectedState) return;
       
       setLoading(true);
       try {
-        const data = await getAirDNAData(selectedCity, selectedState, zipCode || undefined);
+        const data = await getAirDNAData(selectedCity, selectedState);
         setExistingData(data);
-        
-        // Pre-fill form with existing data
-        const revenueMap: Record<number, string> = {};
-        data.forEach(d => {
-          // Only pre-fill if zip code matches (or both are empty for city-wide)
-          const dataZip = d.zip_code || '';
-          if (dataZip === zipCode) {
-            revenueMap[d.bedrooms] = d.average_annual_revenue.toString();
-          }
-        });
-        setRevenues(revenueMap);
       } catch (error) {
         console.error('Failed to fetch AirDNA data:', error);
-        setRevenues({});
         setExistingData([]);
       } finally {
         setLoading(false);
       }
     };
     fetchAirDNAData();
-  }, [selectedCity, selectedState, zipCode]);
+  }, [selectedCity, selectedState]);
 
   const handleCitySelect = (value: string) => {
     const [city, state] = value.split('|');
     setSelectedCity(city);
     setSelectedState(state);
-    setZipCode(''); // Reset zip when city changes
-    setSaved(false);
+    setZipCode('');
   };
 
-  const handleZipSelect = (value: string) => {
-    setZipCode(value);
-    setSaved(false);
+  const handleAmenityToggle = (key: string) => {
+    setSelectedAmenities(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
   };
 
-  const handleRevenueChange = (bedrooms: number, value: string) => {
-    const cleaned = value.replace(/[^\d]/g, '');
-    setRevenues(prev => ({ ...prev, [bedrooms]: cleaned }));
-    setSaved(false);
+  const clearAmenities = () => {
+    setSelectedAmenities({});
   };
 
   const handleSave = async () => {
     if (!selectedCity || !selectedState) return;
-
-    const data = BEDROOM_COUNTS
-      .filter(br => revenues[br] && parseInt(revenues[br]) > 0)
-      .map(br => ({
-        bedrooms: br,
-        average_annual_revenue: parseInt(revenues[br]),
-      }));
-
-    if (data.length === 0) {
-      alert('Please enter at least one revenue value');
+    if (!revenue || parseInt(revenue) <= 0) {
+      alert('Please enter a revenue value');
       return;
     }
 
     setSaving(true);
     try {
-      await saveAirDNAData(selectedCity, selectedState, data, zipCode || undefined);
-      setSaved(true);
-      onDataSaved?.();
+      // Build amenities object
+      const amenities: AirDNAAmenities = {};
+      AMENITY_OPTIONS.forEach(opt => {
+        if (selectedAmenities[opt.key]) {
+          (amenities as any)[opt.key] = true;
+        }
+      });
+
+      await saveAirDNAData({
+        city: selectedCity,
+        state: selectedState,
+        zipCode: zipCode || undefined,
+        bedroomsMin,
+        bedroomsMax,
+        averageAnnualRevenue: parseInt(revenue),
+        amenities: Object.keys(amenities).length > 0 ? amenities : undefined
+      });
       
-      // Refresh existing data and zip codes
-      const newData = await getAirDNAData(selectedCity, selectedState, zipCode || undefined);
+      // Refresh data
+      const newData = await getAirDNAData(selectedCity, selectedState);
       setExistingData(newData);
       
-      const zips = await getAirDNAZipCodes(selectedCity, selectedState);
-      setExistingZipCodes(zips);
+      // Reset form
+      setRevenue('');
+      setSelectedAmenities({});
+      onDataSaved?.();
     } catch (error) {
       console.error('Failed to save AirDNA data:', error);
       alert('Failed to save data. Please try again.');
@@ -141,17 +138,36 @@ export default function AirDNAInput({ onDataSaved }: Props) {
     }
   };
 
-  const getExistingValue = (bedrooms: number): number | null => {
-    const existing = existingData.find(d => {
-      const dataZip = d.zip_code || '';
-      return d.bedrooms === bedrooms && dataZip === zipCode;
-    });
-    return existing ? existing.average_annual_revenue : null;
+  const handleDelete = async (id: number) => {
+    if (!confirm('Delete this AirDNA entry?')) return;
+    
+    try {
+      await deleteAirDNAData(id);
+      const newData = await getAirDNAData(selectedCity, selectedState);
+      setExistingData(newData);
+      onDataSaved?.();
+    } catch (error) {
+      console.error('Failed to delete:', error);
+    }
   };
 
-  // Check if we have city-wide data
-  const hasCityWideData = existingZipCodes.includes(null);
-  const zipCodesWithData = existingZipCodes.filter(z => z !== null) as string[];
+  const getAmenityBadges = (data: AirDNAData) => {
+    const badges = [];
+    if (data.has_pool) badges.push({ label: 'Pool', icon: '🏊' });
+    if (data.has_waterfront) badges.push({ label: 'Waterfront', icon: '🏖️' });
+    if (data.has_waterview) badges.push({ label: 'Water View', icon: '🌊' });
+    if (data.has_basement) badges.push({ label: 'Basement', icon: '⬇️' });
+    if (data.has_garage) badges.push({ label: 'Garage', icon: '🚗' });
+    if (data.has_yard) badges.push({ label: 'Yard', icon: '🌳' });
+    if (data.has_pet_friendly) badges.push({ label: 'Pet Friendly', icon: '🐕' });
+    if (data.has_office) badges.push({ label: 'Office', icon: '💼' });
+    if (data.has_den) badges.push({ label: 'Den', icon: '📚' });
+    if (data.has_loft) badges.push({ label: 'Loft', icon: '🏠' });
+    if (data.has_mother_in_law) badges.push({ label: 'In-Law', icon: '🏘️' });
+    return badges;
+  };
+
+  const selectedAmenityCount = Object.values(selectedAmenities).filter(Boolean).length;
 
   return (
     <div className="card">
@@ -161,7 +177,7 @@ export default function AirDNAInput({ onDataSaved }: Props) {
       </h2>
 
       <p className="text-sm text-gray-600 mb-4">
-        Enter the average annual revenue from AirDNA. You can enter city-wide data or specify a zip code for more granular analysis.
+        Add revenue data from AirDNA. Specify bedroom range and optionally filter by amenities for more accurate comparisons.
       </p>
 
       {/* City selector */}
@@ -186,137 +202,227 @@ export default function AirDNAInput({ onDataSaved }: Props) {
           <label className="input-label">
             Zip Code <span className="text-gray-400 font-normal">(optional)</span>
           </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={zipCode}
-              onChange={(e) => {
-                setZipCode(e.target.value.replace(/[^\d]/g, '').slice(0, 5));
-                setSaved(false);
-              }}
-              placeholder="e.g., 60601"
-              className="input flex-1"
-              maxLength={5}
-              disabled={!selectedCity}
-            />
-            {zipCode && (
-              <button
-                onClick={() => setZipCode('')}
-                className="btn-secondary px-3"
-                title="Clear zip code (use city-wide)"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <p className="text-xs text-gray-500 mt-1">
-            {zipCode ? `Data for zip code ${zipCode}` : 'City-wide average (no zip code)'}
-          </p>
+          <input
+            type="text"
+            value={zipCode}
+            onChange={(e) => setZipCode(e.target.value.replace(/[^\d]/g, '').slice(0, 5))}
+            placeholder="e.g., 60601"
+            className="input"
+            maxLength={5}
+            disabled={!selectedCity}
+          />
         </div>
       </div>
 
-      {/* Existing zip codes */}
-      {selectedCity && (existingZipCodes.length > 0) && (
-        <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-          <p className="text-xs font-medium text-gray-600 mb-2">Existing data:</p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => handleZipSelect('')}
-              className={`text-xs px-2 py-1 rounded-full border transition-colors ${
-                zipCode === '' 
-                  ? 'bg-primary-100 border-primary-300 text-primary-800' 
-                  : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
-              }`}
-            >
-              City-wide {hasCityWideData && '✓'}
-            </button>
-            {zipCodesWithData.map(zip => (
-              <button
-                key={zip}
-                onClick={() => handleZipSelect(zip)}
-                className={`text-xs px-2 py-1 rounded-full border transition-colors ${
-                  zipCode === zip 
-                    ? 'bg-primary-100 border-primary-300 text-primary-800' 
-                    : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                {zip} ✓
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {selectedCity && selectedState && (
         <>
+          {/* Add new entry form */}
+          <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <Plus className="h-4 w-4" />
+              Add Revenue Entry
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              {/* Bedroom Range */}
+              <div>
+                <label className="input-label">Bedrooms Min</label>
+                <select
+                  value={bedroomsMin}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    setBedroomsMin(val);
+                    if (bedroomsMax < val) setBedroomsMax(val);
+                  }}
+                  className="input"
+                >
+                  {BEDROOM_OPTIONS.map(br => (
+                    <option key={br} value={br}>{br} BR</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="input-label">Bedrooms Max</label>
+                <select
+                  value={bedroomsMax}
+                  onChange={(e) => setBedroomsMax(parseInt(e.target.value))}
+                  className="input"
+                >
+                  {BEDROOM_OPTIONS.filter(br => br >= bedroomsMin).map(br => (
+                    <option key={br} value={br}>{br} BR</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Revenue */}
+              <div>
+                <label className="input-label">Annual Revenue *</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                  <input
+                    type="text"
+                    value={revenue}
+                    onChange={(e) => setRevenue(e.target.value.replace(/[^\d]/g, ''))}
+                    placeholder="e.g., 65000"
+                    className="input pl-7"
+                  />
+                </div>
+                {revenue && parseInt(revenue) > 0 && (
+                  <p className="text-xs text-green-600 mt-1">
+                    {formatCurrency(parseInt(revenue) / 12)}/mo
+                  </p>
+                )}
+              </div>
+
+              {/* Amenities toggle */}
+              <div className="flex items-end">
+                <button
+                  onClick={() => setShowAmenities(!showAmenities)}
+                  className={`btn w-full ${showAmenities || selectedAmenityCount > 0 ? 'btn-primary' : 'btn-secondary'}`}
+                >
+                  Amenities
+                  {selectedAmenityCount > 0 && (
+                    <span className="ml-1 bg-white/20 px-1.5 py-0.5 rounded text-xs">
+                      {selectedAmenityCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Amenity selection */}
+            {showAmenities && (
+              <div className="mb-4 p-3 bg-white rounded-lg border border-gray-200">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-gray-600">
+                    Select amenities (listings must have these)
+                  </p>
+                  {selectedAmenityCount > 0 && (
+                    <button onClick={clearAmenities} className="text-xs text-gray-500 hover:text-gray-700">
+                      Clear all
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {AMENITY_OPTIONS.map(opt => {
+                    const isActive = selectedAmenities[opt.key];
+                    return (
+                      <button
+                        key={opt.key}
+                        onClick={() => handleAmenityToggle(opt.key)}
+                        className={`
+                          inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm
+                          transition-colors border
+                          ${isActive 
+                            ? 'bg-green-100 border-green-300 text-green-800' 
+                            : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'
+                          }
+                        `}
+                      >
+                        <span>{opt.icon}</span>
+                        <span>{opt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Revenue will be used for listings that match these amenities.
+                </p>
+              </div>
+            )}
+
+            {/* Save button */}
+            <button
+              onClick={handleSave}
+              disabled={saving || !revenue || parseInt(revenue) <= 0}
+              className="btn-primary"
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" />
+                  Save Entry
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Existing entries */}
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
             </div>
-          ) : (
-            <>
-              {/* Revenue inputs */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-                {BEDROOM_COUNTS.map(bedrooms => {
-                  const existingValue = getExistingValue(bedrooms);
+          ) : existingData.length > 0 ? (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                Existing Entries ({existingData.length})
+              </h3>
+              <div className="space-y-2">
+                {existingData.map(entry => {
+                  const badges = getAmenityBadges(entry);
                   return (
-                    <div key={bedrooms}>
-                      <label className="input-label">
-                        {bedrooms} BR
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
-                        <input
-                          type="text"
-                          value={revenues[bedrooms] || ''}
-                          onChange={(e) => handleRevenueChange(bedrooms, e.target.value)}
-                          placeholder="Annual"
-                          className="input pl-7"
-                        />
+                    <div 
+                      key={entry.id} 
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div>
+                          <span className="font-medium text-gray-900">
+                            {entry.bedrooms_min === entry.bedrooms_max 
+                              ? `${entry.bedrooms_min} BR` 
+                              : `${entry.bedrooms_min}-${entry.bedrooms_max} BR`
+                            }
+                          </span>
+                          {entry.zip_code && (
+                            <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                              {entry.zip_code}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-green-600 font-semibold">
+                          {formatCurrency(entry.average_annual_revenue)}/yr
+                          <span className="text-gray-500 font-normal text-sm ml-1">
+                            ({formatCurrency(entry.average_annual_revenue / 12)}/mo)
+                          </span>
+                        </div>
+                        {badges.length > 0 && (
+                          <div className="flex gap-1">
+                            {badges.map((badge, i) => (
+                              <span 
+                                key={i} 
+                                className="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded"
+                                title={badge.label}
+                              >
+                                {badge.icon}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {badges.length === 0 && (
+                          <span className="text-xs text-gray-400">No amenity filter</span>
+                        )}
                       </div>
-                      {revenues[bedrooms] && parseInt(revenues[bedrooms]) > 0 && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {formatCurrency(parseInt(revenues[bedrooms]) / 12)}/mo
-                        </p>
-                      )}
+                      <button
+                        onClick={() => handleDelete(entry.id)}
+                        className="text-red-500 hover:text-red-700 p-1"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   );
                 })}
               </div>
-
-              {/* Save button */}
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={handleSave}
-                  disabled={saving || !Object.values(revenues).some(v => v && parseInt(v) > 0)}
-                  className="btn-primary"
-                >
-                  {saving ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Saving...
-                    </>
-                  ) : saved ? (
-                    <>
-                      <Check className="h-4 w-4" />
-                      Saved!
-                    </>
-                  ) : (
-                    <>
-                      <Save className="h-4 w-4" />
-                      Save {zipCode ? `for ${zipCode}` : 'City-wide Data'}
-                    </>
-                  )}
-                </button>
-                
-                {existingData.length > 0 && (
-                  <span className="text-sm text-gray-500">
-                    {existingData.filter(d => (d.zip_code || '') === zipCode).length} bedroom values saved
-                    {zipCode ? ` for ${zipCode}` : ' (city-wide)'}
-                  </span>
-                )}
-              </div>
-            </>
+            </div>
+          ) : (
+            <div className="text-center py-6 text-gray-500 text-sm">
+              No AirDNA data entries yet. Add one above to get started.
+            </div>
           )}
         </>
       )}
