@@ -136,6 +136,8 @@ class AirDNAData(Base):
     has_pet_friendly = Column(Boolean, nullable=True)
     has_mother_in_law = Column(Boolean, nullable=True)  # In-law suite (property feature)
     
+    # Timestamps for data lifecycle management
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)  # For 1-year expiration
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Note: We use a more flexible approach - no strict unique constraint
@@ -146,4 +148,34 @@ class AirDNAData(Base):
     # Composite indexes for faster queries
     __table_args__ = (
         Index('idx_airdna_city_bedrooms', 'city_id', 'bedrooms_min', 'bedrooms_max'),
+    )
+
+
+class AIScreenshotAnalysis(Base):
+    """Stores AI screenshot analyses permanently for future reference"""
+    __tablename__ = "ai_screenshot_analyses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Image data (base64 encoded)
+    image_data = Column(Text, nullable=False)  # Base64 encoded image
+    image_type = Column(String(50), default='image/png')  # MIME type
+    
+    # Context and analysis
+    user_context = Column(Text, nullable=True)  # User-provided context
+    ai_response = Column(Text, nullable=False)  # AI's analysis response
+    conversation_history = Column(Text, nullable=True)  # JSON of full conversation
+    
+    # Extracted data (if any)
+    extracted_city = Column(String(100), nullable=True)
+    extracted_state = Column(String(50), nullable=True)
+    extracted_bedrooms = Column(Integer, nullable=True)
+    extracted_annual_revenue = Column(Float, nullable=True)
+    extracted_monthly_revenue = Column(Float, nullable=True)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    __table_args__ = (
+        Index('idx_ai_analysis_created', 'created_at'),
     )

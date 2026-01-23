@@ -175,6 +175,7 @@ class AirDNADataResponse(BaseModel):
     has_yard: Optional[bool] = None
     has_pet_friendly: Optional[bool] = None
     has_mother_in_law: Optional[bool] = None
+    created_at: Optional[datetime] = None  # For showing data age
     updated_at: datetime
 
     class Config:
@@ -242,3 +243,20 @@ class ScrapeStatus(BaseModel):
     status: str
     listings_found: int = 0
     message: str = ""
+
+
+# AI Screenshot Analysis Schemas
+class AIScreenshotAnalysisResponse(BaseModel):
+    id: int
+    image_type: str
+    user_context: Optional[str] = None
+    ai_response: str
+    extracted_city: Optional[str] = None
+    extracted_state: Optional[str] = None
+    extracted_bedrooms: Optional[int] = None
+    extracted_annual_revenue: Optional[float] = None
+    extracted_monthly_revenue: Optional[float] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True

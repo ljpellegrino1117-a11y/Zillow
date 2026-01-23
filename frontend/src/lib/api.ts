@@ -461,10 +461,34 @@ export const getDiscrepancyAnalysis = async (
 export interface AIAnalysisResponse {
   conversation_id: string;
   message: string;
+  analysis_id?: number;
   extracted_data?: {
     raw_response: string;
     needs_clarification: boolean;
+    city?: string;
+    state?: string;
+    bedrooms?: number;
+    annual_revenue?: number;
+    monthly_revenue?: number;
+    analysis_id?: number;
   };
+}
+
+export interface SavedAIAnalysis {
+  id: number;
+  image_type: string;
+  user_context?: string;
+  ai_response: string;
+  extracted_city?: string;
+  extracted_state?: string;
+  extracted_bedrooms?: number;
+  extracted_annual_revenue?: number;
+  extracted_monthly_revenue?: number;
+  created_at: string;
+}
+
+export interface AIAnalysisDetail extends SavedAIAnalysis {
+  image_data: string;
 }
 
 export const analyzeScreenshot = async (
@@ -496,5 +520,15 @@ export const continueAIConversation = async (
   formData.append('message', message);
   
   const response = await axios.post(`${API_BASE}/ai/continue-conversation`, formData);
+  return response.data;
+};
+
+export const getSavedAIAnalyses = async (limit: number = 50): Promise<SavedAIAnalysis[]> => {
+  const response = await axios.get(`${API_BASE}/ai/saved-analyses?limit=${limit}`);
+  return response.data;
+};
+
+export const getAIAnalysisDetail = async (analysisId: number): Promise<AIAnalysisDetail> => {
+  const response = await axios.get(`${API_BASE}/ai/analysis/${analysisId}`);
   return response.data;
 };

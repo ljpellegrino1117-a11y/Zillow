@@ -13,15 +13,17 @@ import base64
 import os
 
 from .database import engine, get_db, Base
-from .models import City, ZillowListing, AirDNAData
+from .models import City, ZillowListing, AirDNAData, AIScreenshotAnalysis
 from .schemas import (
     CityCreate, CityResponse,
     ZillowListingResponse,
     AirDNAInput, AirDNADataResponse,
     DiscrepancyResult,
-    ScrapeRequest, ScrapeStatus
+    ScrapeRequest, ScrapeStatus,
+    AIScreenshotAnalysisResponse
 )
 from .scraper import scrape_zillow
+from datetime import timedelta
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -1182,12 +1184,16 @@ async def analyze_airdna_screenshot(
     image: UploadFile = File(...),
     context: str = Form(""),
     conversation_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
 ):
     """
     Analyze an AirDNA screenshot using AI vision.
     Extracts revenue data and can ask clarifying questions.
+    Saves analysis to database for future reference.
     Requires OPENAI_API_KEY environment variable.
     """
+    import json
+    
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key:
         raise HTTPException(
@@ -1239,7 +1245,16 @@ When you identify revenue data, always specify:
 If you're confident about the data, provide a summary like:
 "I found: [X] bedrooms, $[Y] annual revenue ($[Z]/month), [Location]"
 
-If you need clarification, ask specific questions."""
+After your analysis, ALWAYS end with a structured data block in this exact format:
+---EXTRACTED_DATA---
+city: [city name or "unknown"]
+state: [state abbreviation or "unknown"]
+bedrooms: [number or "unknown"]
+annual_revenue: [number or "unknown"]
+monthly_revenue: [number or "unknown"]
+---END_DATA---
+
+If you need clarification, ask specific questions but still provide the data block with what you know."""
         }]
         ai_conversations[conversation_id] = messages
     
@@ -1281,18 +1296,80 @@ If you need clarification, ask specific questions."""
             messages = [messages[0]] + messages[-10:]
         ai_conversations[conversation_id] = messages
         
+        # Parse extracted data from the response
+        extracted_city = None
+        extracted_state = None
+        extracted_bedrooms = None
+        extracted_annual = None
+        extracted_monthly = None
+        
+        if "---EXTRACTED_DATA---" in assistant_message:
+            try:
+                data_block = assistant_message.split("---EXTRACTED_DATA---")[1].split("---END_DATA---")[0]
+                for line in data_block.strip().split('\n'):
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        key = key.strip().lower()
+                        value = value.strip()
+                        if value.lower() != 'unknown':
+                            if key == 'city':
+                                extracted_city = value
+                            elif key == 'state':
+                                extracted_state = value
+                            elif key == 'bedrooms':
+                                try:
+                                    extracted_bedrooms = int(value.replace(',', ''))
+                                except:
+                                    pass
+                            elif key == 'annual_revenue':
+                                try:
+                                    extracted_annual = float(value.replace('$', '').replace(',', ''))
+                                except:
+                                    pass
+                            elif key == 'monthly_revenue':
+                                try:
+                                    extracted_monthly = float(value.replace('$', '').replace(',', ''))
+                                except:
+                                    pass
+            except Exception as e:
+                logger.warning(f"Failed to parse extracted data: {e}")
+        
+        # Save analysis to database
+        analysis = AIScreenshotAnalysis(
+            image_data=base64_image,
+            image_type=media_type,
+            user_context=context if context else None,
+            ai_response=assistant_message,
+            conversation_history=json.dumps(messages[-6:]) if len(messages) > 1 else None,  # Last 6 messages
+            extracted_city=extracted_city,
+            extracted_state=extracted_state,
+            extracted_bedrooms=extracted_bedrooms,
+            extracted_annual_revenue=extracted_annual,
+            extracted_monthly_revenue=extracted_monthly
+        )
+        db.add(analysis)
+        db.commit()
+        db.refresh(analysis)
+        
         # Try to extract structured data from the response
         extracted_data = None
-        if "$" in assistant_message and any(word in assistant_message.lower() for word in ["annual", "monthly", "revenue", "bedroom"]):
+        if "$" in assistant_message or extracted_annual or extracted_monthly:
             extracted_data = {
                 "raw_response": assistant_message,
-                "needs_clarification": "?" in assistant_message or "unclear" in assistant_message.lower()
+                "needs_clarification": "?" in assistant_message or "unclear" in assistant_message.lower(),
+                "city": extracted_city,
+                "state": extracted_state,
+                "bedrooms": extracted_bedrooms,
+                "annual_revenue": extracted_annual,
+                "monthly_revenue": extracted_monthly,
+                "analysis_id": analysis.id
             }
         
         return {
             "conversation_id": conversation_id,
             "message": assistant_message,
-            "extracted_data": extracted_data
+            "extracted_data": extracted_data,
+            "analysis_id": analysis.id
         }
         
     except Exception as e:
@@ -1347,10 +1424,69 @@ async def continue_ai_conversation(
         raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
 
 
+@app.get("/api/ai/saved-analyses", response_model=List[AIScreenshotAnalysisResponse])
+def get_saved_ai_analyses(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db)
+):
+    """Get saved AI screenshot analyses (newest first)"""
+    analyses = db.query(AIScreenshotAnalysis)\
+        .order_by(AIScreenshotAnalysis.created_at.desc())\
+        .limit(limit)\
+        .all()
+    return analyses
+
+
+@app.get("/api/ai/analysis/{analysis_id}")
+def get_ai_analysis(analysis_id: int, db: Session = Depends(get_db)):
+    """Get a specific AI analysis including the image"""
+    analysis = db.query(AIScreenshotAnalysis).filter(AIScreenshotAnalysis.id == analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return {
+        "id": analysis.id,
+        "image_data": analysis.image_data,
+        "image_type": analysis.image_type,
+        "user_context": analysis.user_context,
+        "ai_response": analysis.ai_response,
+        "extracted_city": analysis.extracted_city,
+        "extracted_state": analysis.extracted_state,
+        "extracted_bedrooms": analysis.extracted_bedrooms,
+        "extracted_annual_revenue": analysis.extracted_annual_revenue,
+        "extracted_monthly_revenue": analysis.extracted_monthly_revenue,
+        "created_at": analysis.created_at.isoformat()
+    }
+
+
 @app.get("/api/health")
 def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+# ==================== Auto-cleanup for old AirDNA data ====================
+
+def cleanup_old_airdna_data():
+    """Remove AirDNA data older than 1 year"""
+    from .database import SessionLocal
+    db = SessionLocal()
+    try:
+        one_year_ago = datetime.utcnow() - timedelta(days=365)
+        deleted = db.query(AirDNAData).filter(AirDNAData.created_at < one_year_ago).delete()
+        db.commit()
+        if deleted > 0:
+            logger.info(f"Cleaned up {deleted} AirDNA entries older than 1 year")
+    except Exception as e:
+        logger.error(f"Error cleaning up old AirDNA data: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+async def startup_cleanup():
+    """Run cleanup on startup"""
+    cleanup_old_airdna_data()
 
 
 if __name__ == "__main__":

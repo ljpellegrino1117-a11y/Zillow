@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Save, DollarSign, Loader2, Trash2, Plus, Check, X, Minus, Upload, Camera, MessageSquare, Send, Image as ImageIcon } from 'lucide-react';
-import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, analyzeScreenshot, continueAIConversation, City, AirDNAData, AirDNAAmenities } from '@/lib/api';
+import { Save, DollarSign, Loader2, Trash2, Plus, Check, X, Minus, Upload, Camera, MessageSquare, Send, Image as ImageIcon, History, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
+import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, analyzeScreenshot, continueAIConversation, getSavedAIAnalyses, getAIAnalysisDetail, City, AirDNAData, AirDNAAmenities, SavedAIAnalysis } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 
 interface Props {
@@ -56,6 +56,13 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiFollowUp, setAiFollowUp] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Saved AI Analyses
+  const [savedAnalyses, setSavedAnalyses] = useState<SavedAIAnalysis[]>([]);
+  const [showSavedAnalyses, setShowSavedAnalyses] = useState(false);
+  const [loadingSaved, setLoadingSaved] = useState(false);
+  const [expandedAnalysis, setExpandedAnalysis] = useState<number | null>(null);
+  const [analysisImage, setAnalysisImage] = useState<string | null>(null);
 
   // Fetch cities on mount and when refreshTrigger changes
   useEffect(() => {
@@ -274,6 +281,56 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
     }
   };
 
+  const loadSavedAnalyses = async () => {
+    setLoadingSaved(true);
+    try {
+      const analyses = await getSavedAIAnalyses(20);
+      setSavedAnalyses(analyses);
+    } catch (error) {
+      console.error('Failed to load saved analyses:', error);
+    } finally {
+      setLoadingSaved(false);
+    }
+  };
+
+  const toggleSavedAnalyses = () => {
+    if (!showSavedAnalyses && savedAnalyses.length === 0) {
+      loadSavedAnalyses();
+    }
+    setShowSavedAnalyses(!showSavedAnalyses);
+  };
+
+  const viewAnalysisImage = async (analysisId: number) => {
+    if (expandedAnalysis === analysisId) {
+      setExpandedAnalysis(null);
+      setAnalysisImage(null);
+      return;
+    }
+    
+    try {
+      const detail = await getAIAnalysisDetail(analysisId);
+      setAnalysisImage(`data:${detail.image_type};base64,${detail.image_data}`);
+      setExpandedAnalysis(analysisId);
+    } catch (error) {
+      console.error('Failed to load analysis image:', error);
+    }
+  };
+
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffMonths = Math.floor(diffDays / 30);
+    
+    if (diffDays < 1) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 30) return `${diffDays} days ago`;
+    if (diffMonths === 1) return '1 month ago';
+    if (diffMonths < 12) return `${diffMonths} months ago`;
+    return `${Math.floor(diffMonths / 12)} year(s) ago`;
+  };
+
   const getAmenityBadges = (data: AirDNAData) => {
     const badges: { label: string; icon: string; state: 'with' | 'without' }[] = [];
     
@@ -309,18 +366,14 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
           AirDNA Revenue Data
         </h2>
         {existingData.length > 0 && (
-          <button
-            onClick={handleClearAll}
-            className="btn text-xs py-1 px-2 text-red-600 hover:bg-red-50"
-          >
-            <Trash2 className="h-3 w-3" />
-            Clear All
-          </button>
+          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+            {existingData.length} saved entries
+          </span>
         )}
       </div>
 
       <p className="text-sm text-gray-600 mb-4">
-        Add revenue data from AirDNA. Specify bedroom range and optionally filter by amenities for more accurate comparisons.
+        Add revenue data from AirDNA. Data is automatically saved and persists for 1 year.
       </p>
 
       {/* AI Screenshot Analysis Toggle */}
@@ -471,6 +524,94 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
           <p className="text-xs text-purple-500 mt-3">
             Requires OPENAI_API_KEY environment variable on the backend.
           </p>
+
+          {/* Saved Analyses Toggle */}
+          <div className="mt-4 pt-4 border-t border-purple-200">
+            <button
+              onClick={toggleSavedAnalyses}
+              className="flex items-center gap-2 text-sm text-purple-700 hover:text-purple-900"
+            >
+              <History className="h-4 w-4" />
+              View Saved Analyses
+              {showSavedAnalyses ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+          </div>
+
+          {/* Saved Analyses List */}
+          {showSavedAnalyses && (
+            <div className="mt-3 space-y-2 max-h-80 overflow-y-auto">
+              {loadingSaved ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-purple-600" />
+                </div>
+              ) : savedAnalyses.length === 0 ? (
+                <p className="text-xs text-purple-500 text-center py-4">No saved analyses yet</p>
+              ) : (
+                savedAnalyses.map((analysis) => (
+                  <div key={analysis.id} className="bg-white rounded-lg border border-purple-100 p-3">
+                    <div 
+                      className="flex items-start justify-between cursor-pointer"
+                      onClick={() => viewAnalysisImage(analysis.id)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Calendar className="h-3 w-3 text-gray-400" />
+                          <span className="text-xs text-gray-500">{formatTimeAgo(analysis.created_at)}</span>
+                          {analysis.extracted_city && analysis.extracted_state && (
+                            <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+                              {analysis.extracted_city}, {analysis.extracted_state}
+                            </span>
+                          )}
+                          {analysis.extracted_bedrooms && (
+                            <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                              {analysis.extracted_bedrooms} BR
+                            </span>
+                          )}
+                        </div>
+                        {(analysis.extracted_annual_revenue || analysis.extracted_monthly_revenue) && (
+                          <div className="text-sm font-medium text-green-600">
+                            {analysis.extracted_annual_revenue 
+                              ? `$${analysis.extracted_annual_revenue.toLocaleString()}/year`
+                              : analysis.extracted_monthly_revenue 
+                                ? `$${analysis.extracted_monthly_revenue.toLocaleString()}/month`
+                                : ''
+                            }
+                          </div>
+                        )}
+                        {analysis.user_context && (
+                          <p className="text-xs text-gray-500 truncate mt-1">
+                            Context: {analysis.user_context}
+                          </p>
+                        )}
+                      </div>
+                      <div className="ml-2">
+                        {expandedAnalysis === analysis.id ? (
+                          <ChevronUp className="h-4 w-4 text-gray-400" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 text-gray-400" />
+                        )}
+                      </div>
+                    </div>
+                    
+                    {expandedAnalysis === analysis.id && (
+                      <div className="mt-3 pt-3 border-t border-purple-100">
+                        {analysisImage && (
+                          <img 
+                            src={analysisImage} 
+                            alt="Analysis screenshot" 
+                            className="w-full max-h-32 object-contain rounded mb-2"
+                          />
+                        )}
+                        <div className="text-xs text-gray-600 bg-gray-50 rounded p-2 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                          {analysis.ai_response.split('---EXTRACTED_DATA---')[0].trim()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       )}
 
