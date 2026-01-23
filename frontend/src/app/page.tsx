@@ -49,7 +49,7 @@ export default function Dashboard() {
         {/* Top Section: Cities & AirDNA Input */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <CityManager onCityChange={handleDataChange} />
-          <AirDNAInput onDataSaved={handleDataChange} />
+          <AirDNAInput onDataSaved={handleDataChange} refreshTrigger={refreshTrigger} />
         </div>
 
         {/* Tab Navigation */}

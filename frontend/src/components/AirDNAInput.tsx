@@ -7,6 +7,7 @@ import { formatCurrency } from '@/lib/utils';
 
 interface Props {
   onDataSaved?: () => void;
+  refreshTrigger?: number;
 }
 
 const BEDROOM_OPTIONS = [3, 4, 5, 6, 7, 8];
@@ -23,7 +24,7 @@ const AMENITY_OPTIONS = [
   { key: 'has_mother_in_law', label: 'In-Law Suite', icon: '🏘️' },
 ];
 
-export default function AirDNAInput({ onDataSaved }: Props) {
+export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
   const [cities, setCities] = useState<City[]>([]);
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [selectedState, setSelectedState] = useState<string>('');
@@ -39,7 +40,7 @@ export default function AirDNAInput({ onDataSaved }: Props) {
   const [selectedAmenities, setSelectedAmenities] = useState<Record<string, boolean>>({});
   const [showAmenities, setShowAmenities] = useState(false);
 
-  // Fetch cities on mount
+  // Fetch cities on mount and when refreshTrigger changes
   useEffect(() => {
     const fetchCities = async () => {
       try {
@@ -54,7 +55,7 @@ export default function AirDNAInput({ onDataSaved }: Props) {
       }
     };
     fetchCities();
-  }, [selectedCity]);
+  }, [refreshTrigger]);
 
   // Fetch AirDNA data when city changes
   useEffect(() => {
