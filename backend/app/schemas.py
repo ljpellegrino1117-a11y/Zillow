@@ -7,6 +7,7 @@ from datetime import datetime
 class CityBase(BaseModel):
     city: str
     state: str
+    zip_code: Optional[str] = None  # Optional zip code to narrow search
 
 
 class CityCreate(CityBase):
@@ -150,6 +151,7 @@ class DiscrepancyResult(BaseModel):
 class ScrapeRequest(BaseModel):
     city: str
     state: str
+    zip_code: Optional[str] = None  # Optional zip code to narrow search
     min_bedrooms: int = 3
     max_bedrooms: int = 8
 
@@ -157,6 +159,7 @@ class ScrapeRequest(BaseModel):
 class ScrapeStatus(BaseModel):
     city: str
     state: str
+    zip_code: Optional[str] = None
     status: str
     listings_found: int = 0
     message: str = ""

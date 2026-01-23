@@ -6,6 +6,7 @@ export interface City {
   id: number;
   city: string;
   state: string;
+  zip_code: string | null;
   created_at: string;
   last_scraped: string | null;
 }
@@ -94,6 +95,7 @@ export interface DiscrepancyResult {
 export interface ScrapeStatus {
   city: string;
   state: string;
+  zip_code: string | null;
   status: string;
   listings_found: number;
   message: string;
@@ -136,28 +138,35 @@ export const getCities = async (): Promise<City[]> => {
   return response.data;
 };
 
-export const createCity = async (city: string, state: string): Promise<City> => {
-  const response = await axios.post(`${API_BASE}/cities`, { city, state });
+export const createCity = async (city: string, state: string, zipCode?: string): Promise<City> => {
+  const response = await axios.post(`${API_BASE}/cities`, { 
+    city, 
+    state,
+    zip_code: zipCode || null
+  });
   return response.data;
 };
 
-export const deleteCity = async (city: string, state: string): Promise<void> => {
-  await axios.delete(`${API_BASE}/cities/${encodeURIComponent(city)}/${encodeURIComponent(state)}`);
+export const deleteCity = async (city: string, state: string, zipCode?: string): Promise<void> => {
+  const params = zipCode ? `?zip_code=${encodeURIComponent(zipCode)}` : '';
+  await axios.delete(`${API_BASE}/cities/${encodeURIComponent(city)}/${encodeURIComponent(state)}${params}`);
 };
 
 // Scraping API
-export const startScrape = async (city: string, state: string, minBedrooms = 3, maxBedrooms = 8): Promise<ScrapeStatus> => {
+export const startScrape = async (city: string, state: string, minBedrooms = 3, maxBedrooms = 8, zipCode?: string): Promise<ScrapeStatus> => {
   const response = await axios.post(`${API_BASE}/scrape`, {
     city,
     state,
+    zip_code: zipCode || null,
     min_bedrooms: minBedrooms,
     max_bedrooms: maxBedrooms,
   });
   return response.data;
 };
 
-export const getScrapeStatus = async (city: string, state: string): Promise<ScrapeStatus> => {
-  const response = await axios.get(`${API_BASE}/scrape/${encodeURIComponent(city)}/${encodeURIComponent(state)}/status`);
+export const getScrapeStatus = async (city: string, state: string, zipCode?: string): Promise<ScrapeStatus> => {
+  const params = zipCode ? `?zip_code=${encodeURIComponent(zipCode)}` : '';
+  const response = await axios.get(`${API_BASE}/scrape/${encodeURIComponent(city)}/${encodeURIComponent(state)}/status${params}`);
   return response.data;
 };
 

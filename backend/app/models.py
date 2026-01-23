@@ -10,11 +10,12 @@ class City(Base):
     id = Column(Integer, primary_key=True, index=True)
     city = Column(String(100), nullable=False)
     state = Column(String(50), nullable=False)
+    zip_code = Column(String(10), nullable=True)  # Optional zip code to narrow search
     created_at = Column(DateTime, default=datetime.utcnow)
     last_scraped = Column(DateTime)
 
     __table_args__ = (
-        UniqueConstraint('city', 'state', name='unique_city_state'),
+        UniqueConstraint('city', 'state', 'zip_code', name='unique_city_state_zip'),
     )
 
     listings = relationship("ZillowListing", back_populates="city_rel")

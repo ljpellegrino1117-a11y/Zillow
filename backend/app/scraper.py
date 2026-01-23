@@ -386,8 +386,8 @@ class ZillowScraperAPI:
         if self.client:
             await self.client.aclose()
     
-    def _build_zillow_url(self, city: str, state: str, bedrooms: int, page: int = 1, listing_type: str = 'rental') -> str:
-        """Build Zillow search URL for a city.
+    def _build_zillow_url(self, city: str, state: str, bedrooms: int, page: int = 1, listing_type: str = 'rental', zip_code: str = None) -> str:
+        """Build Zillow search URL for a city or zip code.
         
         Args:
             city: City name
@@ -395,21 +395,31 @@ class ZillowScraperAPI:
             bedrooms: Number of bedrooms to filter
             page: Page number
             listing_type: 'rental' or 'for_sale'
+            zip_code: Optional zip code to narrow search
         """
-        # Format: city-state (e.g., "chicago-il", "miami-fl")
-        city_slug = city.lower().replace(' ', '-')
-        state_slug = state.lower()
-        
-        if listing_type == 'for_sale':
-            # For sale listings
-            base = f"https://www.zillow.com/{city_slug}-{state_slug}/"
+        # If zip code is provided, use zip-based URL
+        if zip_code:
+            if listing_type == 'for_sale':
+                base = f"https://www.zillow.com/{zip_code}/"
+            else:
+                base = f"https://www.zillow.com/{zip_code}/rentals/"
             if bedrooms:
                 base += f"{bedrooms}-bedrooms/"
         else:
-            # Rental listings
-            base = f"https://www.zillow.com/{city_slug}-{state_slug}/rentals/"
-            if bedrooms:
-                base += f"{bedrooms}-bedrooms/"
+            # Format: city-state (e.g., "chicago-il", "miami-fl")
+            city_slug = city.lower().replace(' ', '-')
+            state_slug = state.lower()
+            
+            if listing_type == 'for_sale':
+                # For sale listings
+                base = f"https://www.zillow.com/{city_slug}-{state_slug}/"
+                if bedrooms:
+                    base += f"{bedrooms}-bedrooms/"
+            else:
+                # Rental listings
+                base = f"https://www.zillow.com/{city_slug}-{state_slug}/rentals/"
+                if bedrooms:
+                    base += f"{bedrooms}-bedrooms/"
         
         if page > 1:
             base += f"{page}_p/"
@@ -807,22 +817,24 @@ class ZillowScraperAPI:
         max_pages_per_bedroom: int,
         listing_type: str,
         seen_ids: set,
-        filter_creative_financing: bool = False
+        filter_creative_financing: bool = False,
+        zip_code: str = None
     ) -> List[Dict[str, Any]]:
         """
         Scrape listings of a specific type (rental or for_sale).
         """
         all_listings = []
         type_label = "FOR SALE" if listing_type == 'for_sale' else "RENTALS"
+        location_label = f"{city}, {state}" + (f" ({zip_code})" if zip_code else "")
         
         for bedrooms in range(min_bedrooms, max_bedrooms + 1):
-            logger.info(f"Scraping {city}, {state} [{type_label}] - {bedrooms} bedrooms...")
+            logger.info(f"Scraping {location_label} [{type_label}] - {bedrooms} bedrooms...")
             
             page = 1
             empty_pages = 0
             
             while page <= max_pages_per_bedroom:
-                url = self._build_zillow_url(city, state, bedrooms, page, listing_type)
+                url = self._build_zillow_url(city, state, bedrooms, page, listing_type, zip_code)
                 html = await self._fetch_page(url)
                 
                 if not html:
@@ -897,7 +909,8 @@ class ZillowScraperAPI:
         min_bedrooms: int = 3,
         max_bedrooms: int = 8,
         max_pages_per_bedroom: int = 10,
-        include_for_sale_creative: bool = True
+        include_for_sale_creative: bool = True,
+        zip_code: str = None
     ) -> List[Dict[str, Any]]:
         """
         Scrape rental listings and optionally for-sale listings with creative financing.
@@ -909,37 +922,41 @@ class ZillowScraperAPI:
             max_bedrooms: Maximum bedroom count (default 8)
             max_pages_per_bedroom: Max pages per bedroom count
             include_for_sale_creative: Also scrape for-sale with creative financing terms
+            zip_code: Optional zip code to narrow search
             
         Returns:
             List of listing dictionaries
         """
         all_listings = []
         seen_ids = set()
+        location_label = f"{city}, {state}" + (f" ({zip_code})" if zip_code else "")
         
         # 1. Scrape RENTAL listings
-        logger.info(f"=== Scraping RENTAL listings for {city}, {state} ===")
+        logger.info(f"=== Scraping RENTAL listings for {location_label} ===")
         rentals = await self._scrape_listing_type(
             city, state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
             listing_type='rental',
             seen_ids=seen_ids,
-            filter_creative_financing=False
+            filter_creative_financing=False,
+            zip_code=zip_code
         )
         all_listings.extend(rentals)
         logger.info(f"Found {len(rentals)} rental listings")
         
         # 2. Scrape FOR SALE listings (only keep creative financing)
         if include_for_sale_creative:
-            logger.info(f"\n=== Scraping FOR SALE listings (creative financing only) for {city}, {state} ===")
+            logger.info(f"\n=== Scraping FOR SALE listings (creative financing only) for {location_label} ===")
             for_sale = await self._scrape_listing_type(
                 city, state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
                 listing_type='for_sale',
                 seen_ids=seen_ids,
-                filter_creative_financing=True  # Only keep listings with creative financing terms
+                filter_creative_financing=True,  # Only keep listings with creative financing terms
+                zip_code=zip_code
             )
             all_listings.extend(for_sale)
             logger.info(f"Found {len(for_sale)} for-sale listings with creative financing")
         
-        logger.info(f"\nTotal: {len(all_listings)} listings for {city}, {state}")
+        logger.info(f"\nTotal: {len(all_listings)} listings for {location_label}")
         return all_listings
 
 
@@ -949,7 +966,8 @@ async def scrape_zillow(
     min_bedrooms: int = 3,
     max_bedrooms: int = 8,
     api_key: Optional[str] = None,
-    on_listing_found: Optional[Callable[[Dict], None]] = None
+    on_listing_found: Optional[Callable[[Dict], None]] = None,
+    zip_code: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Main entry point for scraping Zillow.
@@ -961,12 +979,13 @@ async def scrape_zillow(
         max_bedrooms: Max bedroom count
         api_key: ScraperAPI key (optional)
         on_listing_found: Optional callback
+        zip_code: Optional zip code to narrow search
         
     Returns:
         List of listing dictionaries
     """
     async with ZillowScraperAPI(api_key=api_key, on_listing_found=on_listing_found) as scraper:
-        return await scraper.scrape_city(city, state, min_bedrooms, max_bedrooms)
+        return await scraper.scrape_city(city, state, min_bedrooms, max_bedrooms, zip_code=zip_code)
 
 
 # CLI for testing

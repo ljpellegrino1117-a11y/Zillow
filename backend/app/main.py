@@ -54,10 +54,17 @@ def get_cities(db: Session = Depends(get_db)):
 @app.post("/api/cities", response_model=CityResponse)
 def create_city(city_data: CityCreate, db: Session = Depends(get_db)):
     """Add a new city to track."""
-    existing = db.query(City).filter(
+    # Check for existing city with same city, state, and zip_code
+    query = db.query(City).filter(
         City.city == city_data.city,
         City.state == city_data.state
-    ).first()
+    )
+    if city_data.zip_code:
+        query = query.filter(City.zip_code == city_data.zip_code)
+    else:
+        query = query.filter(City.zip_code.is_(None))
+    
+    existing = query.first()
     if existing:
         return existing
     
@@ -69,12 +76,18 @@ def create_city(city_data: CityCreate, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/cities/{city}/{state}")
-def delete_city(city: str, state: str, db: Session = Depends(get_db)):
+def delete_city(city: str, state: str, zip_code: Optional[str] = None, db: Session = Depends(get_db)):
     """Delete a city and all associated data."""
-    city_obj = db.query(City).filter(
+    query = db.query(City).filter(
         City.city == city,
         City.state == state
-    ).first()
+    )
+    if zip_code:
+        query = query.filter(City.zip_code == zip_code)
+    else:
+        query = query.filter(City.zip_code.is_(None))
+    
+    city_obj = query.first()
     if not city_obj:
         raise HTTPException(status_code=404, detail="City not found")
     
@@ -83,28 +96,35 @@ def delete_city(city: str, state: str, db: Session = Depends(get_db)):
     db.query(AirDNAData).filter(AirDNAData.city_id == city_obj.id).delete()
     db.delete(city_obj)
     db.commit()
-    return {"message": f"Deleted {city}, {state} and all associated data"}
+    zip_info = f" {zip_code}" if zip_code else ""
+    return {"message": f"Deleted {city}, {state}{zip_info} and all associated data"}
 
 
 # ==================== Scraping Endpoints ====================
 
-async def run_scrape_job(city: str, state: str, min_bedrooms: int, max_bedrooms: int, db_session_factory):
+async def run_scrape_job(city: str, state: str, min_bedrooms: int, max_bedrooms: int, db_session_factory, zip_code: str = None):
     """Background task to run scraping job."""
-    job_key = f"{city}_{state}"
+    job_key = f"{city}_{state}" + (f"_{zip_code}" if zip_code else "")
     scrape_jobs[job_key] = {"status": "running", "listings_found": 0, "message": "Scraping in progress..."}
     
     try:
-        listings = await scrape_zillow(city, state, min_bedrooms, max_bedrooms)
+        listings = await scrape_zillow(city, state, min_bedrooms, max_bedrooms, zip_code=zip_code)
         
         db = db_session_factory()
         try:
             # Get or create city
-            city_obj = db.query(City).filter(
+            query = db.query(City).filter(
                 City.city == city,
                 City.state == state
-            ).first()
+            )
+            if zip_code:
+                query = query.filter(City.zip_code == zip_code)
+            else:
+                query = query.filter(City.zip_code.is_(None))
+            
+            city_obj = query.first()
             if not city_obj:
-                city_obj = City(city=city, state=state)
+                city_obj = City(city=city, state=state, zip_code=zip_code)
                 db.add(city_obj)
                 db.commit()
                 db.refresh(city_obj)
@@ -192,14 +212,15 @@ async def run_scrape_job(city: str, state: str, min_bedrooms: int, max_bedrooms:
 
 @app.post("/api/scrape", response_model=ScrapeStatus)
 async def start_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Start a scraping job for a city."""
+    """Start a scraping job for a city (optionally filtered by zip code)."""
     from .database import SessionLocal
     
-    job_key = f"{request.city}_{request.state}"
+    job_key = f"{request.city}_{request.state}" + (f"_{request.zip_code}" if request.zip_code else "")
     if job_key in scrape_jobs and scrape_jobs[job_key]["status"] == "running":
         return ScrapeStatus(
             city=request.city,
             state=request.state,
+            zip_code=request.zip_code,
             status="running",
             message="Scrape already in progress"
         )
@@ -210,7 +231,8 @@ async def start_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks
         request.state,
         request.min_bedrooms,
         request.max_bedrooms,
-        SessionLocal
+        SessionLocal,
+        request.zip_code
     )
     
     scrape_jobs[job_key] = {"status": "running", "listings_found": 0, "message": "Starting scrape..."}
@@ -218,19 +240,21 @@ async def start_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks
     return ScrapeStatus(
         city=request.city,
         state=request.state,
+        zip_code=request.zip_code,
         status="running",
         message="Scrape job started"
     )
 
 
 @app.get("/api/scrape/{city}/{state}/status", response_model=ScrapeStatus)
-def get_scrape_status(city: str, state: str):
+def get_scrape_status(city: str, state: str, zip_code: Optional[str] = None):
     """Get the status of a scraping job."""
-    job_key = f"{city}_{state}"
+    job_key = f"{city}_{state}" + (f"_{zip_code}" if zip_code else "")
     if job_key not in scrape_jobs:
         return ScrapeStatus(
             city=city,
             state=state,
+            zip_code=zip_code,
             status="not_started",
             message="No scrape job found"
         )
@@ -239,6 +263,7 @@ def get_scrape_status(city: str, state: str):
     return ScrapeStatus(
         city=city,
         state=state,
+        zip_code=zip_code,
         status=job["status"],
         listings_found=job.get("listings_found", 0),
         message=job.get("message", "")
