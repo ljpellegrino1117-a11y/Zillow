@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Save, DollarSign, Loader2, Trash2, Plus } from 'lucide-react';
+import { Save, DollarSign, Loader2, Trash2, Plus, Check, X, Minus } from 'lucide-react';
 import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, City, AirDNAData, AirDNAAmenities } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 
@@ -12,10 +12,14 @@ interface Props {
 
 const BEDROOM_OPTIONS = [3, 4, 5, 6, 7, 8];
 
+// Tri-state: true = WITH, false = WITHOUT, undefined = ANY
+type AmenityState = true | false | undefined;
+
 // Property amenities for AirDNA revenue matching
 // NOTE: Extra rooms (office, den, loft) are NOT here - they determine potential bedrooms on listings
 const AMENITY_OPTIONS = [
   { key: 'has_pool', label: 'Pool', icon: '🏊' },
+  { key: 'has_hot_tub', label: 'Hot Tub', icon: '🛁' },
   { key: 'has_waterfront', label: 'Waterfront/View', icon: '🌊' },
   { key: 'has_basement', label: 'Basement', icon: '⬇️' },
   { key: 'has_garage', label: 'Garage', icon: '🚗' },
@@ -37,7 +41,8 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
   const [bedroomsMin, setBedroomsMin] = useState<number>(3);
   const [bedroomsMax, setBedroomsMax] = useState<number>(3);
   const [revenue, setRevenue] = useState<string>('');
-  const [selectedAmenities, setSelectedAmenities] = useState<Record<string, boolean>>({});
+  // Tri-state amenities: true = WITH, false = WITHOUT, undefined = ANY (not set)
+  const [selectedAmenities, setSelectedAmenities] = useState<Record<string, AmenityState>>({});
   const [showAmenities, setShowAmenities] = useState(false);
 
   // Fetch cities on mount and when refreshTrigger changes
@@ -83,16 +88,31 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
     setZipCode('');
   };
 
+  // Cycle through: undefined (ANY) -> true (WITH) -> false (WITHOUT) -> undefined (ANY)
   const handleAmenityToggle = (key: string) => {
-    setSelectedAmenities(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
+    setSelectedAmenities(prev => {
+      const current = prev[key];
+      let next: AmenityState;
+      if (current === undefined) next = true;      // ANY -> WITH
+      else if (current === true) next = false;      // WITH -> WITHOUT
+      else next = undefined;                        // WITHOUT -> ANY
+      
+      const newState = { ...prev };
+      if (next === undefined) {
+        delete newState[key];
+      } else {
+        newState[key] = next;
+      }
+      return newState;
+    });
   };
 
   const clearAmenities = () => {
     setSelectedAmenities({});
   };
+
+  // Count amenities that have a specific state (WITH or WITHOUT)
+  const selectedAmenityCount = Object.keys(selectedAmenities).length;
 
   const handleSave = async () => {
     if (!selectedCity || !selectedState) return;
@@ -103,11 +123,13 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
 
     setSaving(true);
     try {
-      // Build amenities object
-      const amenities: AirDNAAmenities = {};
+      // Build amenities object with tri-state values
+      // true = WITH (required), false = WITHOUT (excluded)
+      const amenities: Record<string, boolean> = {};
       AMENITY_OPTIONS.forEach(opt => {
-        if (selectedAmenities[opt.key]) {
-          (amenities as any)[opt.key] = true;
+        const state = selectedAmenities[opt.key];
+        if (state !== undefined) {
+          amenities[opt.key] = state; // true for WITH, false for WITHOUT
         }
       });
 
@@ -165,18 +187,31 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
   };
 
   const getAmenityBadges = (data: AirDNAData) => {
-    const badges = [];
-    if (data.has_pool) badges.push({ label: 'Pool', icon: '🏊' });
-    if (data.has_waterfront) badges.push({ label: 'Waterfront/View', icon: '🌊' });
-    if (data.has_basement) badges.push({ label: 'Basement', icon: '⬇️' });
-    if (data.has_garage) badges.push({ label: 'Garage', icon: '🚗' });
-    if (data.has_yard) badges.push({ label: 'Yard', icon: '🌳' });
-    if (data.has_pet_friendly) badges.push({ label: 'Pet Friendly', icon: '🐕' });
-    if (data.has_mother_in_law) badges.push({ label: 'In-Law', icon: '🏘️' });
+    const badges: { label: string; icon: string; state: 'with' | 'without' }[] = [];
+    
+    // Check each amenity - now they can be true (WITH) or false (WITHOUT)
+    const amenityMap: Record<string, { label: string; icon: string }> = {
+      has_pool: { label: 'Pool', icon: '🏊' },
+      has_hot_tub: { label: 'Hot Tub', icon: '🛁' },
+      has_waterfront: { label: 'Waterfront', icon: '🌊' },
+      has_basement: { label: 'Basement', icon: '⬇️' },
+      has_garage: { label: 'Garage', icon: '🚗' },
+      has_yard: { label: 'Yard', icon: '🌳' },
+      has_pet_friendly: { label: 'Pet Friendly', icon: '🐕' },
+      has_mother_in_law: { label: 'In-Law', icon: '🏘️' },
+    };
+
+    for (const [key, info] of Object.entries(amenityMap)) {
+      const value = (data as any)[key];
+      if (value === true) {
+        badges.push({ ...info, state: 'with' });
+      } else if (value === false) {
+        badges.push({ ...info, state: 'without' });
+      }
+    }
+    
     return badges;
   };
-
-  const selectedAmenityCount = Object.values(selectedAmenities).filter(Boolean).length;
 
   return (
     <div className="card">
@@ -311,13 +346,18 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
               </div>
             </div>
 
-            {/* Amenity selection */}
+            {/* Amenity selection - tri-state: WITH / WITHOUT / ANY */}
             {showAmenities && (
               <div className="mb-4 p-3 bg-white rounded-lg border border-gray-200">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-medium text-gray-600">
-                    Select amenities (listings must have these)
-                  </p>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-xs font-medium text-gray-600">
+                      Click to cycle: <span className="text-gray-400">Any</span> → 
+                      <span className="text-green-600 mx-1">WITH</span> → 
+                      <span className="text-red-600">WITHOUT</span> → 
+                      <span className="text-gray-400">Any</span>
+                    </p>
+                  </div>
                   {selectedAmenityCount > 0 && (
                     <button onClick={clearAmenities} className="text-xs text-gray-500 hover:text-gray-700">
                       Clear all
@@ -326,7 +366,10 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {AMENITY_OPTIONS.map(opt => {
-                    const isActive = selectedAmenities[opt.key];
+                    const state = selectedAmenities[opt.key];
+                    const isWithRequired = state === true;
+                    const isWithoutRequired = state === false;
+                    
                     return (
                       <button
                         key={opt.key}
@@ -334,21 +377,35 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
                         className={`
                           inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm
                           transition-colors border
-                          ${isActive 
-                            ? 'bg-green-100 border-green-300 text-green-800' 
-                            : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'
+                          ${isWithRequired 
+                            ? 'bg-green-100 border-green-400 text-green-800' 
+                            : isWithoutRequired
+                            ? 'bg-red-100 border-red-400 text-red-800'
+                            : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
                           }
                         `}
+                        title={isWithRequired ? 'WITH (must have)' : isWithoutRequired ? 'WITHOUT (must NOT have)' : 'Any (no filter)'}
                       >
+                        {isWithRequired && <Check className="h-3 w-3" />}
+                        {isWithoutRequired && <X className="h-3 w-3" />}
+                        {!isWithRequired && !isWithoutRequired && <Minus className="h-3 w-3" />}
                         <span>{opt.icon}</span>
                         <span>{opt.label}</span>
                       </button>
                     );
                   })}
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Revenue will be used for listings that match these amenities.
-                </p>
+                <div className="flex gap-4 mt-3 text-xs">
+                  <span className="flex items-center gap-1 text-green-700">
+                    <Check className="h-3 w-3" /> = WITH (must have)
+                  </span>
+                  <span className="flex items-center gap-1 text-red-700">
+                    <X className="h-3 w-3" /> = WITHOUT (must NOT have)
+                  </span>
+                  <span className="flex items-center gap-1 text-gray-500">
+                    <Minus className="h-3 w-3" /> = Any (no filter)
+                  </span>
+                </div>
               </div>
             )}
 
@@ -411,13 +468,18 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
                           </span>
                         </div>
                         {badges.length > 0 && (
-                          <div className="flex gap-1">
+                          <div className="flex gap-1 flex-wrap">
                             {badges.map((badge, i) => (
                               <span 
                                 key={i} 
-                                className="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded"
-                                title={badge.label}
+                                className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
+                                  badge.state === 'with' 
+                                    ? 'bg-green-50 text-green-700' 
+                                    : 'bg-red-50 text-red-700'
+                                }`}
+                                title={`${badge.state === 'with' ? 'WITH' : 'WITHOUT'} ${badge.label}`}
                               >
+                                {badge.state === 'with' ? '✓' : '✗'}
                                 {badge.icon}
                               </span>
                             ))}

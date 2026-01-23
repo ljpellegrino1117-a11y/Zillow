@@ -72,6 +72,7 @@ class ZillowListingResponse(ZillowListingBase):
     city_id: int
     amenities_raw: Optional[str] = None
     has_pool: bool = False
+    has_hot_tub: bool = False
     has_waterfront: bool = False  # Includes waterfront AND waterview
     has_basement: bool = False
     has_unfinished_basement: bool = False
@@ -116,14 +117,22 @@ class ZillowListingResponse(ZillowListingBase):
 
 # AirDNA Schemas
 class AirDNAAmenities(BaseModel):
-    """Amenity filters for AirDNA data (property features, NOT extra rooms)"""
-    has_pool: bool = False
-    has_waterfront: bool = False  # Includes waterfront AND waterview
-    has_basement: bool = False
-    has_garage: bool = False
-    has_yard: bool = False
-    has_pet_friendly: bool = False
-    has_mother_in_law: bool = False  # In-law suite (counts as feature, not bedroom)
+    """
+    Amenity filters for AirDNA data (property features, NOT extra rooms)
+    
+    Tri-state values:
+    - True = WITH (property must have this amenity)
+    - False = WITHOUT (property must NOT have this amenity)
+    - None = ANY (no filter, don't care)
+    """
+    has_pool: Optional[bool] = None
+    has_hot_tub: Optional[bool] = None
+    has_waterfront: Optional[bool] = None  # Includes waterfront AND waterview
+    has_basement: Optional[bool] = None
+    has_garage: Optional[bool] = None
+    has_yard: Optional[bool] = None
+    has_pet_friendly: Optional[bool] = None
+    has_mother_in_law: Optional[bool] = None  # In-law suite (counts as feature, not bedroom)
 
 
 class AirDNADataBase(BaseModel):
@@ -141,13 +150,15 @@ class AirDNADataResponse(BaseModel):
     bedrooms_max: int
     average_annual_revenue: float
     amenity_filter: Optional[str] = None
-    has_pool: bool = False
-    has_waterfront: bool = False  # Includes waterfront AND waterview
-    has_basement: bool = False
-    has_garage: bool = False
-    has_yard: bool = False
-    has_pet_friendly: bool = False
-    has_mother_in_law: bool = False
+    # Tri-state amenities: True = WITH, False = WITHOUT, None = ANY
+    has_pool: Optional[bool] = None
+    has_hot_tub: Optional[bool] = None
+    has_waterfront: Optional[bool] = None  # Includes waterfront AND waterview
+    has_basement: Optional[bool] = None
+    has_garage: Optional[bool] = None
+    has_yard: Optional[bool] = None
+    has_pet_friendly: Optional[bool] = None
+    has_mother_in_law: Optional[bool] = None
     updated_at: datetime
 
     class Config:

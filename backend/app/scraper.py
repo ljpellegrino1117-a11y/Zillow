@@ -37,6 +37,9 @@ AMENITY_PATTERNS = {
     'has_pool': [
         r'\bpool\b', r'\bswimming\b', r'\bswim\b'
     ],
+    'has_hot_tub': [
+        r'\bhot\s*tub\b', r'\bjacuzzi\b', r'\bspa\b', r'\bwhirlpool\b', r'\bjetted\s*tub\b'
+    ],
     'has_waterfront': [  # Combined waterfront AND waterview
         r'\bwater\s*view\b', r'\bwaterview\b', r'\bocean\s*view\b', r'\blake\s*view\b',
         r'\briver\s*view\b', r'\bbay\s*view\b', r'\bsea\s*view\b', r'\bbeach\s*view\b',

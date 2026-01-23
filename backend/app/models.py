@@ -54,6 +54,7 @@ class ZillowListing(Base):
     
     # Detected amenities (scanned from description + amenities)
     has_pool = Column(Boolean, default=False, index=True)
+    has_hot_tub = Column(Boolean, default=False, index=True)
     has_waterfront = Column(Boolean, default=False, index=True)  # Includes waterfront AND waterview
     has_basement = Column(Boolean, default=False, index=True)
     has_unfinished_basement = Column(Boolean, default=False, index=True)
@@ -110,16 +111,17 @@ class AirDNAData(Base):
     bedrooms_max = Column(Integer, nullable=False)  # Max bedrooms (or exact if same as min)
     average_annual_revenue = Column(Float, nullable=False)  # Annual revenue from AirDNA
     
-    # Amenity filters - when set, this revenue applies to listings with these amenities
+    # Amenity filters - tri-state: True=WITH, False=WITHOUT, None=ANY
     # NOTE: Extra rooms (office, den, loft) are NOT amenity filters - they determine potential bedrooms
-    amenity_filter = Column(Text, nullable=True)  # JSON string of required amenities
-    has_pool = Column(Boolean, default=False)
-    has_waterfront = Column(Boolean, default=False)  # Includes waterfront AND waterview
-    has_basement = Column(Boolean, default=False)
-    has_garage = Column(Boolean, default=False)
-    has_yard = Column(Boolean, default=False)
-    has_pet_friendly = Column(Boolean, default=False)
-    has_mother_in_law = Column(Boolean, default=False)  # In-law suite (property feature)
+    amenity_filter = Column(Text, nullable=True)  # JSON string of amenity requirements
+    has_pool = Column(Boolean, nullable=True)  # None = any, True = required, False = excluded
+    has_hot_tub = Column(Boolean, nullable=True)
+    has_waterfront = Column(Boolean, nullable=True)  # Includes waterfront AND waterview
+    has_basement = Column(Boolean, nullable=True)
+    has_garage = Column(Boolean, nullable=True)
+    has_yard = Column(Boolean, nullable=True)
+    has_pet_friendly = Column(Boolean, nullable=True)
+    has_mother_in_law = Column(Boolean, nullable=True)  # In-law suite (property feature)
     
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

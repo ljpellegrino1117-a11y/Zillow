@@ -593,7 +593,13 @@ def get_amenity_counts(
 
 @app.post("/api/airdna", response_model=List[AirDNADataResponse])
 def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
-    """Save AirDNA data for a city with bedroom range and optional amenities."""
+    """Save AirDNA data for a city with bedroom range and optional amenities.
+    
+    Amenities support tri-state values:
+    - True = WITH (property must have this amenity)
+    - False = WITHOUT (property must NOT have this amenity)
+    - None = ANY (no filter, don't care)
+    """
     import json
     
     # Get or create city
@@ -607,14 +613,18 @@ def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(city_obj)
     
-    # Build amenity filter string for matching
+    # Build amenity filter string for matching (includes both WITH and WITHOUT)
     amenity_filter = None
     amenity_fields = {}
     if data.amenities:
         amenities_dict = data.amenities.model_dump()
-        active_amenities = {k: v for k, v in amenities_dict.items() if v}
-        if active_amenities:
-            amenity_filter = json.dumps(sorted(active_amenities.keys()))
+        # Include amenities that are explicitly set (True OR False, not None)
+        set_amenities = {k: v for k, v in amenities_dict.items() if v is not None}
+        if set_amenities:
+            # Store as JSON with format: {"with": [...], "without": [...]}
+            with_amenities = sorted([k for k, v in set_amenities.items() if v is True])
+            without_amenities = sorted([k for k, v in set_amenities.items() if v is False])
+            amenity_filter = json.dumps({"with": with_amenities, "without": without_amenities})
             amenity_fields = amenities_dict
     
     # Check for existing entry with same city, zip, bedroom range, and amenities
