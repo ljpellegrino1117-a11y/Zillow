@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { Building2, ExternalLink, Loader2, Filter, Download } from 'lucide-react';
 import { getListings, getCities, getAmenityCounts, ZillowListing, City, AmenityFilters, AmenityCounts } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
@@ -17,7 +17,7 @@ const LISTING_TYPE_OPTIONS = [
   { value: 'for_sale', label: 'For Sale Only' },
 ];
 
-// Debounce hook for performance - shorter delay for snappier feel
+// Debounce hook for performance - 200ms is optimal balance
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
 
@@ -32,8 +32,66 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-// Page size for pagination
+// Page size for pagination - 50 is optimal for render performance
 const PAGE_SIZE = 50;
+
+// Memoized listing row component for better render performance
+const ListingRow = memo(({ listing }: { listing: ZillowListing }) => (
+  <tr className="hover:bg-gray-50 transition-colors">
+    <td className="px-4 py-3">
+      <div className="text-sm font-medium text-gray-900">{listing.address}</div>
+      <div className="text-xs text-gray-500">{listing.city}, {listing.state} {listing.zip_code}</div>
+    </td>
+    <td className="px-4 py-3 text-center font-medium">{listing.bedrooms}</td>
+    <td className="px-4 py-3 text-center">{listing.bathrooms || '-'}</td>
+    <td className="px-4 py-3 text-right font-semibold text-green-600">
+      {listing.listing_type === 'for_sale' 
+        ? formatCurrency(listing.sale_price || listing.price)
+        : formatCurrency(listing.price)
+      }
+      <span className="text-xs text-gray-400 font-normal">
+        {listing.listing_type === 'for_sale' ? '' : '/mo'}
+      </span>
+    </td>
+    <td className="px-4 py-3 text-center text-sm text-gray-500">
+      {listing.sqft ? listing.sqft.toLocaleString() : '-'}
+    </td>
+    <td className="px-4 py-3 text-center">
+      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+        listing.listing_type === 'for_sale' 
+          ? 'bg-purple-100 text-purple-700' 
+          : 'bg-blue-100 text-blue-700'
+      }`}>
+        {listing.listing_type === 'for_sale' ? 'For Sale' : 'Rental'}
+      </span>
+      {listing.has_creative_financing && (
+        <span className="ml-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+          Creative
+        </span>
+      )}
+    </td>
+    <td className="px-4 py-3 text-center">
+      {listing.potential_bedrooms && listing.potential_bedrooms > listing.bedrooms ? (
+        <span className="text-orange-600 font-medium">
+          +{listing.potential_bedrooms - listing.bedrooms}
+        </span>
+      ) : '-'}
+    </td>
+    <td className="px-4 py-3 text-right">
+      {listing.url && (
+        <a
+          href={listing.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary-600 hover:text-primary-800"
+        >
+          <ExternalLink className="h-4 w-4 inline" />
+        </a>
+      )}
+    </td>
+  </tr>
+));
+ListingRow.displayName = 'ListingRow';
 
 export default function ListingsTable({ refreshTrigger }: Props) {
   const [listings, setListings] = useState<ZillowListing[]>([]);
@@ -50,8 +108,8 @@ export default function ListingsTable({ refreshTrigger }: Props) {
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   
-  // Debounce filter changes - 150ms for snappier feel
-  const debouncedFilters = useDebounce(amenityFilters.required, 150);
+  // Debounce filter changes - 200ms balance between responsiveness and API efficiency
+  const debouncedFilters = useDebounce(amenityFilters.required, 200);
   const fetchController = useRef<AbortController | null>(null);
 
   useEffect(() => {

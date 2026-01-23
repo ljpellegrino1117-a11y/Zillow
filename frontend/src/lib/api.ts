@@ -2,21 +2,29 @@ import axios from 'axios';
 
 const API_BASE = '/api';
 
-// Simple client-side cache with 60 second TTL
-const cache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_TTL = 60000; // 60 seconds
+// High-performance client-side cache with configurable TTL
+const cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
+const DEFAULT_CACHE_TTL = 30000; // 30 seconds for most data
+const STATIC_CACHE_TTL = 120000; // 2 minutes for static data like cities
+const ANALYSIS_CACHE_TTL = 90000; // 90 seconds for analysis data
 
 function getCached<T>(key: string): T | null {
   const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  if (cached && Date.now() - cached.timestamp < cached.ttl) {
     return cached.data as T;
   }
   cache.delete(key);
   return null;
 }
 
-function setCache(key: string, data: any): void {
-  cache.set(key, { data, timestamp: Date.now() });
+function setCache(key: string, data: any, ttl: number = DEFAULT_CACHE_TTL): void {
+  // Limit cache size to prevent memory bloat
+  if (cache.size > 200) {
+    // Remove oldest 50 entries
+    const keys = Array.from(cache.keys()).slice(0, 50);
+    keys.forEach(k => cache.delete(k));
+  }
+  cache.set(key, { data, timestamp: Date.now(), ttl });
 }
 
 export function invalidateCache(pattern?: string): void {
@@ -29,6 +37,11 @@ export function invalidateCache(pattern?: string): void {
       }
     }
   }
+}
+
+// Helper to create cache keys
+function makeCacheKey(...args: (string | number | boolean | null | undefined)[]): string {
+  return args.map(a => a === null || a === undefined ? '_' : String(a)).join(':');
 }
 
 // Property type options for filtering
@@ -218,7 +231,7 @@ export const getCities = async (): Promise<City[]> => {
   if (cached) return cached;
   
   const response = await axios.get(`${API_BASE}/cities`);
-  setCache(cacheKey, response.data);
+  setCache(cacheKey, response.data, STATIC_CACHE_TTL);
   return response.data;
 };
 
@@ -309,6 +322,7 @@ export const getListings = async (
   listingType?: string,
   hasCreativeFinancing?: boolean
 ): Promise<ZillowListing[]> => {
+  // Build params string for cache key and API call
   const params = new URLSearchParams();
   if (city) params.append('city', city);
   if (state) params.append('state', state);
@@ -334,7 +348,13 @@ export const getListings = async (
   params.append('limit', limit.toString());
   params.append('offset', offset.toString());
   
+  // Check cache first
+  const cacheKey = `listings:${params.toString()}`;
+  const cached = getCached<ZillowListing[]>(cacheKey);
+  if (cached) return cached;
+  
   const response = await axios.get(`${API_BASE}/listings?${params.toString()}`);
+  setCache(cacheKey, response.data);
   return response.data;
 };
 
@@ -351,7 +371,14 @@ export const getAmenityCounts = async (city?: string, state?: string, bedrooms?:
   if (city) params.append('city', city);
   if (state) params.append('state', state);
   if (bedrooms !== undefined) params.append('bedrooms', bedrooms.toString());
+  
+  // Check cache
+  const cacheKey = `amenity_counts:${params.toString()}`;
+  const cached = getCached<AmenityCounts>(cacheKey);
+  if (cached) return cached;
+  
   const response = await axios.get(`${API_BASE}/listings/amenity-counts?${params.toString()}`);
+  setCache(cacheKey, response.data);
   return response.data;
 };
 
@@ -418,6 +445,12 @@ export const getDiscrepancyAnalysis = async (
     });
   }
   
+  // Check cache first (analysis is expensive)
+  const cacheKey = `discrepancy:${params.toString()}`;
+  const cached = getCached<DiscrepancyResult[]>(cacheKey);
+  if (cached) return cached;
+  
   const response = await axios.get(`${API_BASE}/analysis/discrepancy?${params.toString()}`);
+  setCache(cacheKey, response.data, ANALYSIS_CACHE_TTL);
   return response.data;
 };

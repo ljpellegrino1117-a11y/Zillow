@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint, Boolean
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint, Boolean, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .database import Base
@@ -104,6 +104,14 @@ class ZillowListing(Base):
     scraped_at = Column(DateTime, default=datetime.utcnow)
 
     city_rel = relationship("City", back_populates="listings")
+    
+    # Composite indexes for faster queries
+    __table_args__ = (
+        Index('idx_listings_city_bedrooms', 'city_id', 'bedrooms'),
+        Index('idx_listings_city_price', 'city_id', 'price'),
+        Index('idx_listings_city_type', 'city_id', 'listing_type'),
+        Index('idx_listings_city_bedrooms_price', 'city_id', 'bedrooms', 'price'),
+    )
 
 
 class AirDNAData(Base):
@@ -134,3 +142,8 @@ class AirDNAData(Base):
     # Multiple entries can exist for same city/bedrooms with different amenities
 
     city_rel = relationship("City", back_populates="airdna_data")
+    
+    # Composite indexes for faster queries
+    __table_args__ = (
+        Index('idx_airdna_city_bedrooms', 'city_id', 'bedrooms_min', 'bedrooms_max'),
+    )

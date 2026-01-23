@@ -75,8 +75,8 @@ export default function DiscrepancyTable({ refreshTrigger }: Props) {
     });
   };
   
-  // Debounce filter changes - 150ms for snappier feel
-  const debouncedFilters = useDebounce(amenityFilters.required, 150);
+  // Debounce filter changes - 200ms balance between responsiveness and API efficiency
+  const debouncedFilters = useDebounce(amenityFilters.required, 200);
 
   useEffect(() => {
     const fetchCities = async () => {

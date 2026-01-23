@@ -27,25 +27,38 @@ Base.metadata.create_all(bind=engine)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Simple in-memory cache with TTL
+# High-performance in-memory cache with TTL
 class SimpleCache:
     def __init__(self, ttl_seconds: int = 30):
         self.cache: Dict[str, Any] = {}
         self.timestamps: Dict[str, float] = {}
         self.ttl = ttl_seconds
+        self._lock = asyncio.Lock() if asyncio else None
     
     def get(self, key: str) -> Optional[Any]:
         if key in self.cache:
             if time.time() - self.timestamps[key] < self.ttl:
                 return self.cache[key]
             else:
-                del self.cache[key]
-                del self.timestamps[key]
+                # Expired - clean up
+                self.cache.pop(key, None)
+                self.timestamps.pop(key, None)
         return None
     
     def set(self, key: str, value: Any):
         self.cache[key] = value
         self.timestamps[key] = time.time()
+        # Limit cache size to prevent memory bloat
+        if len(self.cache) > 500:
+            self._cleanup_oldest()
+    
+    def _cleanup_oldest(self):
+        """Remove oldest 20% of entries when cache is full"""
+        if len(self.cache) > 400:
+            sorted_keys = sorted(self.timestamps.keys(), key=lambda k: self.timestamps[k])
+            for k in sorted_keys[:100]:
+                self.cache.pop(k, None)
+                self.timestamps.pop(k, None)
     
     def invalidate(self, pattern: str = None):
         if pattern is None:
@@ -54,11 +67,17 @@ class SimpleCache:
         else:
             keys_to_delete = [k for k in self.cache if pattern in k]
             for k in keys_to_delete:
-                del self.cache[k]
-                del self.timestamps[k]
+                self.cache.pop(k, None)
+                self.timestamps.pop(k, None)
 
-# Global cache instance - 2 minute TTL for faster responses
-cache = SimpleCache(ttl_seconds=120)
+# Global cache instances with different TTLs
+cache = SimpleCache(ttl_seconds=120)  # Cities cache - 2 minutes
+listings_cache = SimpleCache(ttl_seconds=60)  # Listings cache - 1 minute (more dynamic)
+analysis_cache = SimpleCache(ttl_seconds=180)  # Analysis cache - 3 minutes (expensive queries)
+
+def make_cache_key(*args) -> str:
+    """Create a cache key from arguments"""
+    return ":".join(str(a) if a is not None else "_" for a in args)
 
 app = FastAPI(
     title="Zillow Arbitrage API",
@@ -261,6 +280,10 @@ async def run_scrape_job(
             
             city_obj.last_scraped = datetime.utcnow()
             db.commit()
+            
+            # Invalidate caches when new listings are scraped
+            listings_cache.invalidate()
+            analysis_cache.invalidate()
             
             scrape_jobs[job_key] = {
                 "status": "completed",
@@ -495,20 +518,26 @@ def get_listing_stats(
     state: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Get aggregate statistics for listings."""
-    query = db.query(ZillowListing)
+    """Get aggregate statistics for listings (cached)."""
+    # Check cache first
+    cache_key = make_cache_key("stats", city, state)
+    cached = listings_cache.get(cache_key)
+    if cached is not None:
+        return cached
     
+    city_id = None
     if city and state:
-        city_obj = db.query(City).filter(
+        city_obj = db.query(City.id).filter(
             City.city == city,
             City.state == state
         ).first()
         if city_obj:
-            query = query.filter(ZillowListing.city_id == city_obj.id)
+            city_id = city_obj.id
         else:
             return {"error": "City not found"}
     
-    stats = db.query(
+    # Build optimized query
+    query = db.query(
         ZillowListing.bedrooms,
         func.count(ZillowListing.id).label('count'),
         func.avg(ZillowListing.price).label('avg_price'),
@@ -516,17 +545,12 @@ def get_listing_stats(
         func.max(ZillowListing.price).label('max_price')
     )
     
-    if city and state:
-        city_obj = db.query(City).filter(
-            City.city == city,
-            City.state == state
-        ).first()
-        if city_obj:
-            stats = stats.filter(ZillowListing.city_id == city_obj.id)
+    if city_id:
+        query = query.filter(ZillowListing.city_id == city_id)
     
-    stats = stats.group_by(ZillowListing.bedrooms).all()
+    stats = query.group_by(ZillowListing.bedrooms).all()
     
-    return [
+    result = [
         {
             "bedrooms": s.bedrooms,
             "count": s.count,
@@ -536,6 +560,10 @@ def get_listing_stats(
         }
         for s in stats
     ]
+    
+    # Cache the result
+    listings_cache.set(cache_key, result)
+    return result
 
 
 @app.get("/api/listings/amenity-counts")
@@ -545,55 +573,105 @@ def get_amenity_counts(
     bedrooms: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get counts of listings with each amenity and extra room type."""
-    query = db.query(ZillowListing)
+    """Get counts of listings with each amenity - OPTIMIZED with single query + caching."""
+    # Check cache first
+    cache_key = make_cache_key("amenity_counts", city, state, bedrooms)
+    cached = listings_cache.get(cache_key)
+    if cached is not None:
+        return cached
     
+    city_id = None
     if city and state:
-        city_obj = db.query(City).filter(
+        city_obj = db.query(City.id).filter(
             City.city == city,
             City.state == state
         ).first()
         if city_obj:
-            query = query.filter(ZillowListing.city_id == city_obj.id)
+            city_id = city_obj.id
     
+    # Single optimized query using func.sum with case expressions
+    from sqlalchemy import case
+    
+    # Build base filters
+    filters = []
+    if city_id:
+        filters.append(ZillowListing.city_id == city_id)
     if bedrooms is not None:
-        query = query.filter(ZillowListing.bedrooms == bedrooms)
+        filters.append(ZillowListing.bedrooms == bedrooms)
     
-    total = query.count()
+    # Single query that counts all amenities at once
+    query = db.query(
+        func.count(ZillowListing.id).label('total'),
+        func.sum(case((ZillowListing.has_pool == True, 1), else_=0)).label('has_pool'),
+        func.sum(case((ZillowListing.has_waterfront == True, 1), else_=0)).label('has_waterfront'),
+        func.sum(case((ZillowListing.has_basement == True, 1), else_=0)).label('has_basement'),
+        func.sum(case((ZillowListing.has_unfinished_basement == True, 1), else_=0)).label('has_unfinished_basement'),
+        func.sum(case((ZillowListing.has_finished_basement == True, 1), else_=0)).label('has_finished_basement'),
+        func.sum(case((ZillowListing.has_garage == True, 1), else_=0)).label('has_garage'),
+        func.sum(case((ZillowListing.has_parking == True, 1), else_=0)).label('has_parking'),
+        func.sum(case((ZillowListing.has_laundry == True, 1), else_=0)).label('has_laundry'),
+        func.sum(case((ZillowListing.has_ac == True, 1), else_=0)).label('has_ac'),
+        func.sum(case((ZillowListing.has_fireplace == True, 1), else_=0)).label('has_fireplace'),
+        func.sum(case((ZillowListing.has_yard == True, 1), else_=0)).label('has_yard'),
+        func.sum(case((ZillowListing.has_patio == True, 1), else_=0)).label('has_patio'),
+        func.sum(case((ZillowListing.has_balcony == True, 1), else_=0)).label('has_balcony'),
+        func.sum(case((ZillowListing.has_gym == True, 1), else_=0)).label('has_gym'),
+        func.sum(case((ZillowListing.has_pet_friendly == True, 1), else_=0)).label('has_pet_friendly'),
+        func.sum(case((ZillowListing.has_office == True, 1), else_=0)).label('has_office'),
+        func.sum(case((ZillowListing.has_den == True, 1), else_=0)).label('has_den'),
+        func.sum(case((ZillowListing.has_bonus_room == True, 1), else_=0)).label('has_bonus_room'),
+        func.sum(case((ZillowListing.has_loft == True, 1), else_=0)).label('has_loft'),
+        func.sum(case((ZillowListing.has_flex_space == True, 1), else_=0)).label('has_flex_space'),
+        func.sum(case((ZillowListing.has_sunroom == True, 1), else_=0)).label('has_sunroom'),
+        func.sum(case((ZillowListing.has_media_room == True, 1), else_=0)).label('has_media_room'),
+        func.sum(case((ZillowListing.has_game_room == True, 1), else_=0)).label('has_game_room'),
+        func.sum(case((ZillowListing.has_guest_room == True, 1), else_=0)).label('has_guest_room'),
+        func.sum(case((ZillowListing.has_nursery == True, 1), else_=0)).label('has_nursery'),
+        func.sum(case((ZillowListing.has_studio == True, 1), else_=0)).label('has_studio'),
+        func.sum(case((ZillowListing.has_attic == True, 1), else_=0)).label('has_attic'),
+        func.sum(case((ZillowListing.has_mother_in_law == True, 1), else_=0)).label('has_mother_in_law'),
+    )
     
-    return {
-        "total": total,
-        # Amenities
-        "has_pool": query.filter(ZillowListing.has_pool == True).count(),
-        "has_waterfront": query.filter(ZillowListing.has_waterfront == True).count(),  # Includes waterfront AND waterview
-        "has_basement": query.filter(ZillowListing.has_basement == True).count(),
-        "has_unfinished_basement": query.filter(ZillowListing.has_unfinished_basement == True).count(),
-        "has_finished_basement": query.filter(ZillowListing.has_finished_basement == True).count(),
-        "has_garage": query.filter(ZillowListing.has_garage == True).count(),
-        "has_parking": query.filter(ZillowListing.has_parking == True).count(),
-        "has_laundry": query.filter(ZillowListing.has_laundry == True).count(),
-        "has_ac": query.filter(ZillowListing.has_ac == True).count(),
-        "has_fireplace": query.filter(ZillowListing.has_fireplace == True).count(),
-        "has_yard": query.filter(ZillowListing.has_yard == True).count(),
-        "has_patio": query.filter(ZillowListing.has_patio == True).count(),
-        "has_balcony": query.filter(ZillowListing.has_balcony == True).count(),
-        "has_gym": query.filter(ZillowListing.has_gym == True).count(),
-        "has_pet_friendly": query.filter(ZillowListing.has_pet_friendly == True).count(),
-        # Extra rooms (potential bedrooms)
-        "has_office": query.filter(ZillowListing.has_office == True).count(),
-        "has_den": query.filter(ZillowListing.has_den == True).count(),
-        "has_bonus_room": query.filter(ZillowListing.has_bonus_room == True).count(),
-        "has_loft": query.filter(ZillowListing.has_loft == True).count(),
-        "has_flex_space": query.filter(ZillowListing.has_flex_space == True).count(),
-        "has_sunroom": query.filter(ZillowListing.has_sunroom == True).count(),
-        "has_media_room": query.filter(ZillowListing.has_media_room == True).count(),
-        "has_game_room": query.filter(ZillowListing.has_game_room == True).count(),
-        "has_guest_room": query.filter(ZillowListing.has_guest_room == True).count(),
-        "has_nursery": query.filter(ZillowListing.has_nursery == True).count(),
-        "has_studio": query.filter(ZillowListing.has_studio == True).count(),
-        "has_attic": query.filter(ZillowListing.has_attic == True).count(),
-        "has_mother_in_law": query.filter(ZillowListing.has_mother_in_law == True).count(),
+    if filters:
+        query = query.filter(*filters)
+    
+    row = query.first()
+    
+    result = {
+        "total": row.total or 0,
+        "has_pool": row.has_pool or 0,
+        "has_waterfront": row.has_waterfront or 0,
+        "has_basement": row.has_basement or 0,
+        "has_unfinished_basement": row.has_unfinished_basement or 0,
+        "has_finished_basement": row.has_finished_basement or 0,
+        "has_garage": row.has_garage or 0,
+        "has_parking": row.has_parking or 0,
+        "has_laundry": row.has_laundry or 0,
+        "has_ac": row.has_ac or 0,
+        "has_fireplace": row.has_fireplace or 0,
+        "has_yard": row.has_yard or 0,
+        "has_patio": row.has_patio or 0,
+        "has_balcony": row.has_balcony or 0,
+        "has_gym": row.has_gym or 0,
+        "has_pet_friendly": row.has_pet_friendly or 0,
+        "has_office": row.has_office or 0,
+        "has_den": row.has_den or 0,
+        "has_bonus_room": row.has_bonus_room or 0,
+        "has_loft": row.has_loft or 0,
+        "has_flex_space": row.has_flex_space or 0,
+        "has_sunroom": row.has_sunroom or 0,
+        "has_media_room": row.has_media_room or 0,
+        "has_game_room": row.has_game_room or 0,
+        "has_guest_room": row.has_guest_room or 0,
+        "has_nursery": row.has_nursery or 0,
+        "has_studio": row.has_studio or 0,
+        "has_attic": row.has_attic or 0,
+        "has_mother_in_law": row.has_mother_in_law or 0,
     }
+    
+    # Cache the result
+    listings_cache.set(cache_key, result)
+    return result
 
 
 # ==================== AirDNA Endpoints ====================
@@ -671,6 +749,8 @@ def save_airdna_data(data: AirDNAInput, db: Session = Depends(get_db)):
         db.add(airdna)
         db.commit()
         db.refresh(airdna)
+        # Invalidate analysis cache when new AirDNA data is added
+        analysis_cache.invalidate("discrepancy")
         return airdna
 
 
@@ -688,6 +768,8 @@ def delete_airdna_data(airdna_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="AirDNA data not found")
     db.delete(airdna)
     db.commit()
+    # Invalidate analysis cache
+    analysis_cache.invalidate("discrepancy")
     return {"message": "Deleted successfully"}
 
 
@@ -953,9 +1035,14 @@ def get_discrepancy_analysis(
 ):
     """
     Analyze discrepancy between AirDNA revenue and rental prices.
-    Now includes enhanced profitability metrics, operating cost estimates,
-    and AI-generated commentary on strengths/weaknesses.
+    CACHED for 3 minutes due to expensive computations.
     """
+    # Check cache first (this is an expensive endpoint)
+    cache_key = make_cache_key("discrepancy", city, state, bedrooms, min_bedrooms, max_bedrooms, has_pool, has_waterfront, has_basement, has_unfinished_basement)
+    cached = analysis_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     results = []
     
     # Get cities to analyze
@@ -1077,6 +1164,9 @@ def get_discrepancy_analysis(
     
     # Sort by opportunity score (highest first)
     results.sort(key=lambda x: x.opportunity_score, reverse=True)
+    
+    # Cache the result
+    analysis_cache.set(cache_key, results)
     return results
 
 
