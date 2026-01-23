@@ -31,7 +31,9 @@ export function invalidateCache(pattern?: string): void {
   if (!pattern) {
     cache.clear();
   } else {
-    for (const key of cache.keys()) {
+    // Convert to array for TypeScript compatibility
+    const keys = Array.from(cache.keys());
+    for (const key of keys) {
       if (key.includes(pattern)) {
         cache.delete(key);
       }
