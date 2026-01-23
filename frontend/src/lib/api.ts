@@ -31,6 +31,9 @@ export function invalidateCache(pattern?: string): void {
   }
 }
 
+// Property type options for filtering
+export type PropertyType = 'house' | 'townhome' | 'multi_family' | 'condo' | 'lot' | 'apartment' | 'manufactured';
+
 export interface City {
   id: number;
   city: string;
@@ -43,6 +46,8 @@ export interface City {
   rent_max: number | null;
   purchase_price_min: number | null;
   purchase_price_max: number | null;
+  exclude_hoa: boolean;
+  property_types: PropertyType[] | null;
   created_at: string;
   last_scraped: string | null;
 }
@@ -212,6 +217,8 @@ export interface CreateCityParams {
   rentMax?: number;
   purchasePriceMin?: number;
   purchasePriceMax?: number;
+  excludeHoa?: boolean;
+  propertyTypes?: PropertyType[];
 }
 
 export const createCity = async (params: CreateCityParams): Promise<City> => {
@@ -225,7 +232,9 @@ export const createCity = async (params: CreateCityParams): Promise<City> => {
     rent_min: params.rentMin || null,
     rent_max: params.rentMax || null,
     purchase_price_min: params.purchasePriceMin || null,
-    purchase_price_max: params.purchasePriceMax || null
+    purchase_price_max: params.purchasePriceMax || null,
+    exclude_hoa: params.excludeHoa || false,
+    property_types: params.propertyTypes?.length ? params.propertyTypes : null
   });
   invalidateCache('cities');
   return response.data;

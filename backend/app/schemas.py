@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import datetime
+import json
 
 
 # City Schemas
@@ -16,6 +17,10 @@ class CityBase(BaseModel):
     rent_max: Optional[int] = None  # Max monthly rent
     purchase_price_min: Optional[int] = None  # Min purchase price (for creative financing)
     purchase_price_max: Optional[int] = None  # Max purchase price
+    # HOA filter
+    exclude_hoa: bool = False  # Exclude listings with HOA
+    # Property types filter - list of: house, townhome, multi_family, condo, lot, apartment, manufactured
+    property_types: Optional[List[str]] = None  # If None or empty, include all types
 
 
 class CityCreate(CityBase):
@@ -26,6 +31,17 @@ class CityResponse(CityBase):
     id: int
     created_at: datetime
     last_scraped: Optional[datetime] = None
+
+    @field_validator('property_types', mode='before')
+    @classmethod
+    def parse_property_types(cls, v):
+        """Convert JSON string from database to list"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return None
+        return v
 
     class Config:
         from_attributes = True

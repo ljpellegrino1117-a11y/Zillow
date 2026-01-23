@@ -9,7 +9,8 @@ import {
   deleteCity, 
   startScrape, 
   getScrapeStatus,
-  ScrapeStatus 
+  ScrapeStatus,
+  PropertyType
 } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import CityAutocomplete from './CityAutocomplete';
@@ -26,6 +27,17 @@ const US_STATES = [
   'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
 ];
 
+// Property type options matching the image
+const PROPERTY_TYPE_OPTIONS: { key: PropertyType; label: string }[] = [
+  { key: 'house', label: 'Houses' },
+  { key: 'townhome', label: 'Townhomes' },
+  { key: 'multi_family', label: 'Multi-family' },
+  { key: 'condo', label: 'Condos/Co-ops' },
+  { key: 'lot', label: 'Lots/Land' },
+  { key: 'apartment', label: 'Apartments' },
+  { key: 'manufactured', label: 'Manufactured' },
+];
+
 export default function CityManager({ onCityChange }: Props) {
   const [cities, setCities] = useState<City[]>([]);
   const [newCity, setNewCity] = useState('');
@@ -39,6 +51,9 @@ export default function CityManager({ onCityChange }: Props) {
   const [rentMax, setRentMax] = useState<string>('');
   const [purchasePriceMin, setPurchasePriceMin] = useState<string>('');
   const [purchasePriceMax, setPurchasePriceMax] = useState<string>('');
+  // HOA and property type filters
+  const [excludeHoa, setExcludeHoa] = useState(false);
+  const [selectedPropertyTypes, setSelectedPropertyTypes] = useState<PropertyType[]>(['house', 'townhome', 'condo', 'apartment']);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scrapeStatuses, setScrapeStatuses] = useState<Record<string, ScrapeStatus>>({});
@@ -104,7 +119,9 @@ export default function CityManager({ onCityChange }: Props) {
         rentMin: rentMin ? parseInt(rentMin) : undefined,
         rentMax: rentMax ? parseInt(rentMax) : undefined,
         purchasePriceMin: purchasePriceMin ? parseInt(purchasePriceMin) : undefined,
-        purchasePriceMax: purchasePriceMax ? parseInt(purchasePriceMax) : undefined
+        purchasePriceMax: purchasePriceMax ? parseInt(purchasePriceMax) : undefined,
+        excludeHoa,
+        propertyTypes: selectedPropertyTypes.length > 0 ? selectedPropertyTypes : undefined
       });
       setNewCity('');
       setNewState('');
@@ -116,12 +133,22 @@ export default function CityManager({ onCityChange }: Props) {
       setRentMax('');
       setPurchasePriceMin('');
       setPurchasePriceMax('');
+      setExcludeHoa(false);
+      setSelectedPropertyTypes(['house', 'townhome', 'condo', 'apartment']);
       await fetchCities();
       onCityChange?.();
     } catch (err: any) {
       console.error('Failed to add city:', err);
       setError(err?.response?.data?.detail || err?.message || 'Failed to add search. Please try again.');
     }
+  };
+  
+  const handlePropertyTypeToggle = (type: PropertyType) => {
+    setSelectedPropertyTypes(prev => 
+      prev.includes(type) 
+        ? prev.filter(t => t !== type)
+        : [...prev, type]
+    );
   };
 
   const handleDeleteCity = async (city: string, state: string, zipCode?: string | null) => {
@@ -224,6 +251,32 @@ export default function CityManager({ onCityChange }: Props) {
       else if (min) filters.push(`Buy: ${min}+`);
       else if (max) filters.push(`Buy: up to ${max}`);
     }
+    return filters;
+  };
+
+  const getPropertyFilters = (c: City) => {
+    const filters: string[] = [];
+    
+    // Property types
+    if (c.property_types && c.property_types.length > 0) {
+      const typeLabels: Record<string, string> = {
+        house: 'Houses',
+        townhome: 'Townhomes',
+        multi_family: 'Multi-fam',
+        condo: 'Condos',
+        lot: 'Lots',
+        apartment: 'Apts',
+        manufactured: 'Manuf.'
+      };
+      const types = c.property_types.map(t => typeLabels[t] || t).join(', ');
+      filters.push(types);
+    }
+    
+    // HOA
+    if (c.exclude_hoa) {
+      filters.push('No HOA');
+    }
+    
     return filters;
   };
 
@@ -457,8 +510,61 @@ export default function CityManager({ onCityChange }: Props) {
             </p>
           )}
         </div>
+
+        {/* Property Types */}
+        <div className="border-t border-gray-200 pt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm font-medium text-gray-700">Property Types</span>
+            <span className="text-xs text-gray-400">(applies to rentals & for-sale)</span>
+          </div>
+          
+          <div className="flex flex-wrap gap-2">
+            {PROPERTY_TYPE_OPTIONS.map(opt => {
+              const isSelected = selectedPropertyTypes.includes(opt.key);
+              return (
+                <label 
+                  key={opt.key}
+                  className={`
+                    flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors
+                    ${isSelected 
+                      ? 'bg-blue-50 border-blue-300 text-blue-800' 
+                      : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                    }
+                  `}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => handlePropertyTypeToggle(opt.key)}
+                    className="rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">{opt.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          {selectedPropertyTypes.length === 0 && (
+            <p className="text-xs text-amber-600 mt-2">
+              No property types selected - will search all types
+            </p>
+          )}
+        </div>
+
+        {/* HOA Filter */}
+        <div className="border-t border-gray-200 pt-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={excludeHoa}
+              onChange={(e) => setExcludeHoa(e.target.checked)}
+              className="rounded text-red-600 focus:ring-red-500"
+            />
+            <span className="text-sm text-gray-700">Exclude listings with HOA</span>
+            <span className="text-xs text-gray-400">(no monthly/annual HOA fees)</span>
+          </label>
+        </div>
         
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-500 mt-4">
           Add a city to search. Optionally specify a zip code to narrow results or include surrounding cities.
         </p>
       </div>
@@ -480,7 +586,7 @@ export default function CityManager({ onCityChange }: Props) {
                   Zip / Radius
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
-                  Price Filters
+                  Filters
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
                   Last Scraped
@@ -499,6 +605,7 @@ export default function CityManager({ onCityChange }: Props) {
                 const isRunning = scrapeStatuses[key]?.status === 'running';
                 const locationDesc = getLocationDescription(c);
                 const priceFilters = getPriceFilters(c);
+                const propertyFilters = getPropertyFilters(c);
                 return (
                   <tr key={c.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">
@@ -524,17 +631,23 @@ export default function CityManager({ onCityChange }: Props) {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {priceFilters.length > 0 ? (
-                        <div className="space-y-1">
-                          {priceFilters.map((f, i) => (
-                            <div key={i} className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded inline-block mr-1">
-                              {f}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-gray-400 text-xs">No limits</span>
-                      )}
+                      <div className="space-y-1">
+                        {priceFilters.length > 0 && priceFilters.map((f, i) => (
+                          <div key={`price-${i}`} className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded inline-block mr-1">
+                            {f}
+                          </div>
+                        ))}
+                        {propertyFilters.map((f, i) => (
+                          <div key={`prop-${i}`} className={`text-xs px-2 py-0.5 rounded inline-block mr-1 ${
+                            f === 'No HOA' ? 'text-red-700 bg-red-50' : 'text-purple-700 bg-purple-50'
+                          }`}>
+                            {f}
+                          </div>
+                        ))}
+                        {priceFilters.length === 0 && propertyFilters.length === 0 && (
+                          <span className="text-gray-400 text-xs">No filters</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">
                       {c.last_scraped ? (

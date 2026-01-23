@@ -99,6 +99,8 @@ def get_cities(db: Session = Depends(get_db)):
 @app.post("/api/cities", response_model=CityResponse)
 def create_city(city_data: CityCreate, db: Session = Depends(get_db)):
     """Add a new city to track."""
+    import json
+    
     # Check for existing city with same city, state, and zip_code
     query = db.query(City).filter(
         City.city == city_data.city,
@@ -113,7 +115,12 @@ def create_city(city_data: CityCreate, db: Session = Depends(get_db)):
     if existing:
         return existing
     
-    city = City(**city_data.model_dump())
+    # Convert property_types list to JSON string for storage
+    data = city_data.model_dump()
+    if data.get('property_types'):
+        data['property_types'] = json.dumps(data['property_types'])
+    
+    city = City(**data)
     db.add(city)
     db.commit()
     db.refresh(city)

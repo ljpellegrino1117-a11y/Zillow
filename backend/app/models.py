@@ -20,6 +20,11 @@ class City(Base):
     rent_max = Column(Integer, nullable=True)  # Max monthly rent
     purchase_price_min = Column(Integer, nullable=True)  # Min purchase price (for creative financing)
     purchase_price_max = Column(Integer, nullable=True)  # Max purchase price
+    # HOA filter
+    exclude_hoa = Column(Boolean, default=False)  # Exclude listings with HOA
+    # Property types filter (JSON array of selected types)
+    # Options: house, townhome, multi_family, condo, lot, apartment, manufactured
+    property_types = Column(Text, nullable=True)  # JSON array like ["house", "townhome", "condo"]
     created_at = Column(DateTime, default=datetime.utcnow)
     last_scraped = Column(DateTime)
 
