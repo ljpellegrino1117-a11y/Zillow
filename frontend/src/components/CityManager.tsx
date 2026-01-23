@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, RefreshCw, MapPin, Clock, Loader2, Map } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, MapPin, Clock, Loader2, Map, DollarSign, AlertCircle } from 'lucide-react';
 import { 
   City, 
   getCities, 
@@ -11,7 +11,7 @@ import {
   getScrapeStatus,
   ScrapeStatus 
 } from '@/lib/api';
-import { formatDate } from '@/lib/utils';
+import { formatDate, formatCurrency } from '@/lib/utils';
 
 interface Props {
   onCityChange?: () => void;
@@ -33,7 +33,13 @@ export default function CityManager({ onCityChange }: Props) {
   const [includeSurrounding, setIncludeSurrounding] = useState(false);
   const [surroundingMiles, setSurroundingMiles] = useState<number | string>(25);
   const [surroundingOnly, setSurroundingOnly] = useState(false);
+  // Price range filters
+  const [rentMin, setRentMin] = useState<string>('');
+  const [rentMax, setRentMax] = useState<string>('');
+  const [purchasePriceMin, setPurchasePriceMin] = useState<string>('');
+  const [purchasePriceMax, setPurchasePriceMax] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [scrapeStatuses, setScrapeStatuses] = useState<Record<string, ScrapeStatus>>({});
 
   const fetchCities = useCallback(async () => {
@@ -84,6 +90,7 @@ export default function CityManager({ onCityChange }: Props) {
 
   const handleAddCity = async () => {
     if (!newCity.trim() || !newState.trim()) return;
+    setError(null);
 
     try {
       await createCity({
@@ -92,7 +99,11 @@ export default function CityManager({ onCityChange }: Props) {
         zipCode: newZipCode.trim() || undefined,
         includeSurrounding,
         surroundingMiles: includeSurrounding ? (Number(surroundingMiles) || 25) : undefined,
-        surroundingOnly: includeSurrounding ? surroundingOnly : false
+        surroundingOnly: includeSurrounding ? surroundingOnly : false,
+        rentMin: rentMin ? parseInt(rentMin) : undefined,
+        rentMax: rentMax ? parseInt(rentMax) : undefined,
+        purchasePriceMin: purchasePriceMin ? parseInt(purchasePriceMin) : undefined,
+        purchasePriceMax: purchasePriceMax ? parseInt(purchasePriceMax) : undefined
       });
       setNewCity('');
       setNewState('');
@@ -100,10 +111,15 @@ export default function CityManager({ onCityChange }: Props) {
       setIncludeSurrounding(false);
       setSurroundingMiles(25);
       setSurroundingOnly(false);
+      setRentMin('');
+      setRentMax('');
+      setPurchasePriceMin('');
+      setPurchasePriceMax('');
       await fetchCities();
       onCityChange?.();
-    } catch (error) {
-      console.error('Failed to add city:', error);
+    } catch (err: any) {
+      console.error('Failed to add city:', err);
+      setError(err?.response?.data?.detail || err?.message || 'Failed to add search. Please try again.');
     }
   };
 
@@ -177,6 +193,25 @@ export default function CityManager({ onCityChange }: Props) {
     return desc;
   };
 
+  const getPriceFilters = (c: City) => {
+    const filters = [];
+    if (c.rent_min || c.rent_max) {
+      const min = c.rent_min ? formatCurrency(c.rent_min) : '';
+      const max = c.rent_max ? formatCurrency(c.rent_max) : '';
+      if (min && max) filters.push(`Rent: ${min}-${max}`);
+      else if (min) filters.push(`Rent: ${min}+`);
+      else if (max) filters.push(`Rent: up to ${max}`);
+    }
+    if (c.purchase_price_min || c.purchase_price_max) {
+      const min = c.purchase_price_min ? formatCurrency(c.purchase_price_min) : '';
+      const max = c.purchase_price_max ? formatCurrency(c.purchase_price_max) : '';
+      if (min && max) filters.push(`Buy: ${min}-${max}`);
+      else if (min) filters.push(`Buy: ${min}+`);
+      else if (max) filters.push(`Buy: up to ${max}`);
+    }
+    return filters;
+  };
+
   if (loading) {
     return (
       <div className="card">
@@ -193,6 +228,17 @@ export default function CityManager({ onCityChange }: Props) {
         <MapPin className="h-5 w-5 text-primary-600" />
         Rental Cities Search
       </h2>
+
+      {/* Error message */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700">
+          <AlertCircle className="h-5 w-5 flex-shrink-0" />
+          <span className="text-sm">{error}</span>
+          <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-700">
+            &times;
+          </button>
+        </div>
+      )}
 
       {/* Add new city form */}
       <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-4">
@@ -240,6 +286,70 @@ export default function CityManager({ onCityChange }: Props) {
               <Plus className="h-4 w-4" />
               Add Search
             </button>
+          </div>
+        </div>
+
+        {/* Price Range Filters */}
+        <div className="border-t border-gray-200 pt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <DollarSign className="h-4 w-4 text-green-600" />
+            <span className="text-sm font-medium text-gray-700">Price Filters</span>
+            <span className="text-xs text-gray-400">(leave blank for no limit)</span>
+          </div>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label className="input-label text-xs">Rent Min (monthly)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input
+                  type="text"
+                  value={rentMin}
+                  onChange={(e) => setRentMin(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="No min"
+                  className="input pl-7 text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="input-label text-xs">Rent Max (monthly)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input
+                  type="text"
+                  value={rentMax}
+                  onChange={(e) => setRentMax(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="No max"
+                  className="input pl-7 text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="input-label text-xs">Purchase Min (for sale)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input
+                  type="text"
+                  value={purchasePriceMin}
+                  onChange={(e) => setPurchasePriceMin(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="No min"
+                  className="input pl-7 text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="input-label text-xs">Purchase Max (for sale)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input
+                  type="text"
+                  value={purchasePriceMax}
+                  onChange={(e) => setPurchasePriceMax(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="No max"
+                  className="input pl-7 text-sm"
+                />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -343,6 +453,9 @@ export default function CityManager({ onCityChange }: Props) {
                   Zip / Radius
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
+                  Price Filters
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
                   Last Scraped
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
@@ -358,6 +471,7 @@ export default function CityManager({ onCityChange }: Props) {
                 const key = `${c.city}_${c.state}` + (c.zip_code ? `_${c.zip_code}` : '');
                 const isRunning = scrapeStatuses[key]?.status === 'running';
                 const locationDesc = getLocationDescription(c);
+                const priceFilters = getPriceFilters(c);
                 return (
                   <tr key={c.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">
@@ -380,6 +494,19 @@ export default function CityManager({ onCityChange }: Props) {
                         </span>
                       ) : (
                         <span className="text-gray-400 text-sm">All areas</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {priceFilters.length > 0 ? (
+                        <div className="space-y-1">
+                          {priceFilters.map((f, i) => (
+                            <div key={i} className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded inline-block mr-1">
+                              {f}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 text-xs">No limits</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-600">

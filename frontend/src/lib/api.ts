@@ -10,6 +10,10 @@ export interface City {
   include_surrounding: boolean;
   surrounding_miles: number | null;
   surrounding_only: boolean;
+  rent_min: number | null;
+  rent_max: number | null;
+  purchase_price_min: number | null;
+  purchase_price_max: number | null;
   created_at: string;
   last_scraped: string | null;
 }
@@ -175,6 +179,10 @@ export interface CreateCityParams {
   includeSurrounding?: boolean;
   surroundingMiles?: number;
   surroundingOnly?: boolean;
+  rentMin?: number;
+  rentMax?: number;
+  purchasePriceMin?: number;
+  purchasePriceMax?: number;
 }
 
 export const createCity = async (params: CreateCityParams): Promise<City> => {
@@ -184,7 +192,11 @@ export const createCity = async (params: CreateCityParams): Promise<City> => {
     zip_code: params.zipCode || null,
     include_surrounding: params.includeSurrounding || false,
     surrounding_miles: params.surroundingMiles || null,
-    surrounding_only: params.surroundingOnly || false
+    surrounding_only: params.surroundingOnly || false,
+    rent_min: params.rentMin || null,
+    rent_max: params.rentMax || null,
+    purchase_price_min: params.purchasePriceMin || null,
+    purchase_price_max: params.purchasePriceMax || null
   });
   return response.data;
 };

@@ -15,6 +15,11 @@ class City(Base):
     include_surrounding = Column(Boolean, default=False)  # Include surrounding cities
     surrounding_miles = Column(Integer, nullable=True)  # Radius in miles
     surrounding_only = Column(Boolean, default=False)  # ONLY surrounding, exclude main city
+    # Price filters (null means no limit)
+    rent_min = Column(Integer, nullable=True)  # Min monthly rent
+    rent_max = Column(Integer, nullable=True)  # Max monthly rent
+    purchase_price_min = Column(Integer, nullable=True)  # Min purchase price (for creative financing)
+    purchase_price_max = Column(Integer, nullable=True)  # Max purchase price
     created_at = Column(DateTime, default=datetime.utcnow)
     last_scraped = Column(DateTime)
 

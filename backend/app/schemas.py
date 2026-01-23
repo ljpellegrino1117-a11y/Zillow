@@ -11,6 +11,11 @@ class CityBase(BaseModel):
     include_surrounding: bool = False  # Include surrounding cities
     surrounding_miles: Optional[int] = None  # Radius in miles
     surrounding_only: bool = False  # ONLY surrounding, exclude main city
+    # Price filters (null/None means no limit)
+    rent_min: Optional[int] = None  # Min monthly rent
+    rent_max: Optional[int] = None  # Max monthly rent
+    purchase_price_min: Optional[int] = None  # Min purchase price (for creative financing)
+    purchase_price_max: Optional[int] = None  # Max purchase price
 
 
 class CityCreate(CityBase):
