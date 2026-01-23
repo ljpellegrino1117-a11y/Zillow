@@ -63,6 +63,9 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
   const [loadingSaved, setLoadingSaved] = useState(false);
   const [expandedAnalysis, setExpandedAnalysis] = useState<number | null>(null);
   const [analysisImage, setAnalysisImage] = useState<string | null>(null);
+  
+  // Delete confirmation state
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
   // Fetch cities on mount and when refreshTrigger changes
   useEffect(() => {
@@ -183,17 +186,34 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Delete this AirDNA entry?')) return;
-    
+  const handleDeleteClick = (id: number) => {
+    // First click - show confirm button
+    if (pendingDeleteId === id) {
+      // Already showing confirm, do nothing (user must click confirm)
+      return;
+    }
+    setPendingDeleteId(id);
+    // Auto-cancel after 5 seconds if not confirmed
+    setTimeout(() => {
+      setPendingDeleteId(prev => prev === id ? null : prev);
+    }, 5000);
+  };
+
+  const handleDeleteConfirm = async (id: number) => {
     try {
       await deleteAirDNAData(id);
       const newData = await getAirDNAData(selectedCity, selectedState);
       setExistingData(newData);
+      setPendingDeleteId(null);
       onDataSaved?.();
     } catch (error) {
       console.error('Failed to delete:', error);
+      setPendingDeleteId(null);
     }
+  };
+
+  const handleDeleteCancel = () => {
+    setPendingDeleteId(null);
   };
 
   const handleClearAll = async () => {
@@ -903,13 +923,33 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
                           <span className="text-xs text-gray-400">No amenity filter</span>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleDelete(entry.id)}
-                        className="text-red-500 hover:text-red-700 p-1"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      
+                      {/* Two-step delete confirmation */}
+                      {pendingDeleteId === entry.id ? (
+                        <div className="flex items-center gap-2 animate-pulse">
+                          <span className="text-xs text-red-600 font-medium">Delete?</span>
+                          <button
+                            onClick={() => handleDeleteConfirm(entry.id)}
+                            className="bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1 rounded font-medium"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={handleDeleteCancel}
+                            className="bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs px-2 py-1 rounded"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleDeleteClick(entry.id)}
+                          className="text-gray-400 hover:text-red-500 p-1 transition-colors"
+                          title="Delete entry"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
