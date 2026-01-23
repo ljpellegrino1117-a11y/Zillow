@@ -301,52 +301,52 @@ export default function CityManager({ onCityChange }: Props) {
             <div>
               <label className="input-label text-xs">Rent Min (monthly)</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                 <input
                   type="text"
                   value={rentMin}
                   onChange={(e) => setRentMin(e.target.value.replace(/[^\d]/g, ''))}
-                  placeholder="No min"
-                  className="input pl-7 text-sm"
+                  placeholder="No limit"
+                  className="input pl-6 text-sm"
                 />
               </div>
             </div>
             <div>
               <label className="input-label text-xs">Rent Max (monthly)</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                 <input
                   type="text"
                   value={rentMax}
                   onChange={(e) => setRentMax(e.target.value.replace(/[^\d]/g, ''))}
-                  placeholder="No max"
-                  className="input pl-7 text-sm"
+                  placeholder="No limit"
+                  className="input pl-6 text-sm"
                 />
               </div>
             </div>
             <div>
               <label className="input-label text-xs">Purchase Min (for sale)</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                 <input
                   type="text"
                   value={purchasePriceMin}
                   onChange={(e) => setPurchasePriceMin(e.target.value.replace(/[^\d]/g, ''))}
-                  placeholder="No min"
-                  className="input pl-7 text-sm"
+                  placeholder="No limit"
+                  className="input pl-6 text-sm"
                 />
               </div>
             </div>
             <div>
               <label className="input-label text-xs">Purchase Max (for sale)</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                 <input
                   type="text"
                   value={purchasePriceMax}
                   onChange={(e) => setPurchasePriceMax(e.target.value.replace(/[^\d]/g, ''))}
-                  placeholder="No max"
-                  className="input pl-7 text-sm"
+                  placeholder="No limit"
+                  className="input pl-6 text-sm"
                 />
               </div>
             </div>
