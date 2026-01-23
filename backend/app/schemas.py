@@ -206,6 +206,22 @@ class DiscrepancyResult(BaseModel):
     annual_profit_vs_bottom: float
     roi_vs_avg: float
     roi_vs_bottom: float
+    # Enhanced profitability metrics
+    estimated_occupancy_rate: float = 0.65  # Default 65% occupancy
+    adjusted_annual_revenue: float = 0  # Revenue * occupancy rate
+    estimated_annual_expenses: float = 0  # Operating costs estimate
+    net_annual_profit: float = 0  # Adjusted revenue - rent - expenses
+    net_monthly_cashflow: float = 0  # Net profit / 12
+    break_even_occupancy: float = 0  # Minimum occupancy to break even
+    expense_ratio: float = 0  # Expenses as % of gross revenue
+    # Data quality indicators
+    data_confidence: str = "low"  # low, medium, high based on listing count
+    airdna_data_count: int = 0  # Number of AirDNA entries used
+    # AI Analysis
+    opportunity_score: int = 0  # 1-100 score
+    strengths: List[str] = []  # List of positive factors
+    weaknesses: List[str] = []  # List of risk factors
+    recommendation: str = ""  # AI-generated recommendation
 
 
 class ScrapeRequest(BaseModel):

@@ -154,6 +154,22 @@ export interface DiscrepancyResult {
   annual_profit_vs_bottom: number;
   roi_vs_avg: number;
   roi_vs_bottom: number;
+  // Enhanced profitability metrics
+  estimated_occupancy_rate: number;
+  adjusted_annual_revenue: number;
+  estimated_annual_expenses: number;
+  net_annual_profit: number;
+  net_monthly_cashflow: number;
+  break_even_occupancy: number;
+  expense_ratio: number;
+  // Data quality
+  data_confidence: 'low' | 'medium' | 'high';
+  airdna_data_count: number;
+  // AI Analysis
+  opportunity_score: number;
+  strengths: string[];
+  weaknesses: string[];
+  recommendation: string;
 }
 
 export interface ScrapeStatus {

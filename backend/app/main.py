@@ -735,6 +735,208 @@ def get_airdna_zip_codes(city: str, state: str, db: Session = Depends(get_db)):
 
 # ==================== Analysis Endpoints ====================
 
+def analyze_opportunity(
+    airdna_annual: float,
+    bottom_rent: float,
+    avg_rent: float,
+    listing_count: int,
+    bedrooms: int,
+    airdna_count: int
+) -> dict:
+    """
+    Generate AI-like analysis of an arbitrage opportunity.
+    Returns enhanced metrics and commentary.
+    """
+    # Operating cost estimates (industry standards)
+    # Cleaning: $100-200 per turnover, assume 3 turnovers/month
+    cleaning_per_month = 150 * 3 * 12  # $5,400/year
+    # Supplies and consumables: ~3% of revenue
+    supplies_rate = 0.03
+    # Platform fees (Airbnb/VRBO): ~15% of revenue
+    platform_fee_rate = 0.15
+    # Utilities estimate: $200-400/month depending on size
+    utilities_per_year = (150 + bedrooms * 50) * 12
+    # Insurance: ~$1,500-3,000/year for STR
+    insurance_per_year = 1500 + (bedrooms * 250)
+    # Maintenance/repairs: ~5% of revenue
+    maintenance_rate = 0.05
+    # Management (if not self-managed): 20-25% of revenue (optional, assume self-managed)
+    management_rate = 0.0
+    
+    # Default occupancy rate by bedroom (more bedrooms = lower occupancy typically)
+    base_occupancy = {3: 0.68, 4: 0.65, 5: 0.62, 6: 0.58, 7: 0.55, 8: 0.52}
+    occupancy_rate = base_occupancy.get(bedrooms, 0.60)
+    
+    # Calculate adjusted revenue
+    adjusted_annual_revenue = airdna_annual * occupancy_rate
+    
+    # Calculate expenses
+    variable_expenses = adjusted_annual_revenue * (supplies_rate + platform_fee_rate + maintenance_rate + management_rate)
+    fixed_expenses = cleaning_per_month + utilities_per_year + insurance_per_year
+    total_annual_expenses = variable_expenses + fixed_expenses
+    
+    # Calculate annual rent cost (using bottom 10% as target)
+    annual_rent = bottom_rent * 12
+    
+    # Net profit calculation
+    net_annual_profit = adjusted_annual_revenue - annual_rent - total_annual_expenses
+    net_monthly_cashflow = net_annual_profit / 12
+    
+    # Break-even occupancy calculation
+    # Revenue needed = rent + expenses
+    # At break-even: airdna_annual * occ_rate * (1 - var_rate) = rent + fixed_expenses
+    var_rate = supplies_rate + platform_fee_rate + maintenance_rate
+    if airdna_annual * (1 - var_rate) > 0:
+        break_even_occ = (annual_rent + fixed_expenses) / (airdna_annual * (1 - var_rate))
+    else:
+        break_even_occ = 1.0
+    
+    # Expense ratio
+    expense_ratio = total_annual_expenses / adjusted_annual_revenue if adjusted_annual_revenue > 0 else 0
+    
+    # Data confidence
+    if listing_count >= 20 and airdna_count >= 2:
+        confidence = "high"
+    elif listing_count >= 10 or airdna_count >= 1:
+        confidence = "medium"
+    else:
+        confidence = "low"
+    
+    # Calculate opportunity score (1-100)
+    score = 50  # Base score
+    
+    # Profitability factors (+/- 20 points)
+    profit_margin = net_annual_profit / annual_rent if annual_rent > 0 else 0
+    if profit_margin > 0.5:
+        score += 20
+    elif profit_margin > 0.3:
+        score += 15
+    elif profit_margin > 0.15:
+        score += 10
+    elif profit_margin > 0:
+        score += 5
+    elif profit_margin > -0.1:
+        score -= 5
+    else:
+        score -= 15
+    
+    # Monthly cashflow factors (+/- 15 points)
+    if net_monthly_cashflow > 2000:
+        score += 15
+    elif net_monthly_cashflow > 1000:
+        score += 10
+    elif net_monthly_cashflow > 500:
+        score += 5
+    elif net_monthly_cashflow < 0:
+        score -= 10
+    
+    # Break-even occupancy factors (+/- 10 points)
+    if break_even_occ < 0.40:
+        score += 10
+    elif break_even_occ < 0.50:
+        score += 5
+    elif break_even_occ > 0.75:
+        score -= 10
+    elif break_even_occ > 0.65:
+        score -= 5
+    
+    # Data confidence factor (+/- 5 points)
+    if confidence == "high":
+        score += 5
+    elif confidence == "low":
+        score -= 5
+    
+    # Clamp score to 1-100
+    score = max(1, min(100, score))
+    
+    # Generate strengths
+    strengths = []
+    if net_monthly_cashflow > 2000:
+        strengths.append(f"Strong monthly cashflow (${net_monthly_cashflow:,.0f}/mo)")
+    elif net_monthly_cashflow > 1000:
+        strengths.append(f"Good monthly cashflow (${net_monthly_cashflow:,.0f}/mo)")
+    
+    if break_even_occ < 0.45:
+        strengths.append(f"Low break-even occupancy ({break_even_occ:.0%}) - resilient to market dips")
+    elif break_even_occ < 0.55:
+        strengths.append(f"Reasonable break-even occupancy ({break_even_occ:.0%})")
+    
+    if profit_margin > 0.4:
+        strengths.append(f"Excellent profit margin ({profit_margin:.0%} of rent)")
+    elif profit_margin > 0.25:
+        strengths.append(f"Strong profit margin ({profit_margin:.0%} of rent)")
+    
+    if listing_count >= 15:
+        strengths.append(f"Good market data ({listing_count} comparable listings)")
+    
+    if expense_ratio < 0.35:
+        strengths.append("Low operating expense ratio")
+    
+    airdna_to_rent = airdna_annual / annual_rent if annual_rent > 0 else 0
+    if airdna_to_rent > 2.5:
+        strengths.append(f"Very high revenue potential ({airdna_to_rent:.1f}x rent)")
+    elif airdna_to_rent > 2.0:
+        strengths.append(f"High revenue potential ({airdna_to_rent:.1f}x rent)")
+    
+    # Generate weaknesses
+    weaknesses = []
+    if net_monthly_cashflow < 0:
+        weaknesses.append(f"Negative cashflow (-${abs(net_monthly_cashflow):,.0f}/mo) - not profitable")
+    elif net_monthly_cashflow < 500:
+        weaknesses.append(f"Thin margins (${net_monthly_cashflow:,.0f}/mo cashflow)")
+    
+    if break_even_occ > 0.70:
+        weaknesses.append(f"High break-even occupancy ({break_even_occ:.0%}) - vulnerable to seasonality")
+    elif break_even_occ > 0.60:
+        weaknesses.append(f"Moderate break-even risk ({break_even_occ:.0%} occupancy needed)")
+    
+    if expense_ratio > 0.50:
+        weaknesses.append(f"High expense ratio ({expense_ratio:.0%} of revenue)")
+    elif expense_ratio > 0.40:
+        weaknesses.append(f"Elevated operating costs ({expense_ratio:.0%} of revenue)")
+    
+    if listing_count < 5:
+        weaknesses.append("Limited market data - rent estimates may be unreliable")
+    elif listing_count < 10:
+        weaknesses.append("Moderate market data - consider more research")
+    
+    if confidence == "low":
+        weaknesses.append("Low data confidence - verify AirDNA revenue estimates")
+    
+    if bedrooms >= 6:
+        weaknesses.append(f"Large property ({bedrooms} BR) - higher maintenance and utility costs")
+    
+    if occupancy_rate < 0.55:
+        weaknesses.append(f"Lower expected occupancy ({occupancy_rate:.0%}) for {bedrooms} BR properties")
+    
+    # Generate recommendation
+    if score >= 75:
+        recommendation = f"Strong opportunity with {score}/100 score. Expected ${net_monthly_cashflow:,.0f}/mo cashflow after all expenses. Consider acting quickly on bottom-10% priced listings."
+    elif score >= 60:
+        recommendation = f"Good opportunity ({score}/100). Expected ${net_monthly_cashflow:,.0f}/mo net cashflow. Viable if you can secure rent near ${bottom_rent:,.0f}/mo."
+    elif score >= 45:
+        recommendation = f"Moderate opportunity ({score}/100). Margins are tight at ${net_monthly_cashflow:,.0f}/mo. Success depends on operational efficiency and maintaining {occupancy_rate:.0%}+ occupancy."
+    elif score >= 30:
+        recommendation = f"Marginal opportunity ({score}/100). Consider only if you have cost advantages or local expertise. Break-even requires {break_even_occ:.0%} occupancy."
+    else:
+        recommendation = f"Not recommended ({score}/100). Numbers don't support profitability at current market rates. Net cashflow is ${net_monthly_cashflow:,.0f}/mo."
+    
+    return {
+        "estimated_occupancy_rate": round(occupancy_rate, 2),
+        "adjusted_annual_revenue": round(adjusted_annual_revenue, 2),
+        "estimated_annual_expenses": round(total_annual_expenses, 2),
+        "net_annual_profit": round(net_annual_profit, 2),
+        "net_monthly_cashflow": round(net_monthly_cashflow, 2),
+        "break_even_occupancy": round(min(break_even_occ, 1.0), 2),
+        "expense_ratio": round(expense_ratio, 2),
+        "data_confidence": confidence,
+        "opportunity_score": score,
+        "strengths": strengths[:4],  # Limit to top 4
+        "weaknesses": weaknesses[:4],  # Limit to top 4
+        "recommendation": recommendation,
+    }
+
+
 @app.get("/api/analysis/discrepancy", response_model=List[DiscrepancyResult])
 def get_discrepancy_analysis(
     city: Optional[str] = None,
@@ -751,9 +953,8 @@ def get_discrepancy_analysis(
 ):
     """
     Analyze discrepancy between AirDNA revenue and rental prices.
-    Uses zip-code-specific AirDNA data when matching listings exist,
-    otherwise falls back to city-wide AirDNA data.
-    Can filter by amenities to find specific opportunities.
+    Now includes enhanced profitability metrics, operating cost estimates,
+    and AI-generated commentary on strengths/weaknesses.
     """
     results = []
     
@@ -798,28 +999,22 @@ def get_discrepancy_analysis(
                 continue
             
             # Find matching AirDNA data
-            # Priority: most specific match (amenities + bedroom range) first
-            airdna_annual = None
-            
-            # Find AirDNA entries where this bedroom count is in range
             matching_airdna = [
                 d for d in all_airdna 
                 if d.bedrooms_min <= br <= d.bedrooms_max
             ]
             
-            if matching_airdna:
-                # Prefer entries with matching amenities if amenity filters are set
-                # For now, use the entry with no amenity filter (most general)
-                # or average all matching entries
-                general_entries = [d for d in matching_airdna if not d.amenity_filter]
-                if general_entries:
-                    airdna_annual = sum(d.average_annual_revenue for d in general_entries) / len(general_entries)
-                else:
-                    # Use average of all matching entries
-                    airdna_annual = sum(d.average_annual_revenue for d in matching_airdna) / len(matching_airdna)
-            
-            if not airdna_annual:
+            if not matching_airdna:
                 continue
+            
+            # Calculate AirDNA annual revenue
+            general_entries = [d for d in matching_airdna if not d.amenity_filter]
+            if general_entries:
+                airdna_annual = sum(d.average_annual_revenue for d in general_entries) / len(general_entries)
+                airdna_count = len(general_entries)
+            else:
+                airdna_annual = sum(d.average_annual_revenue for d in matching_airdna) / len(matching_airdna)
+                airdna_count = len(matching_airdna)
             
             prices = [l.price for l in listings]
             avg_price = sum(prices) / len(prices)
@@ -840,6 +1035,16 @@ def get_discrepancy_analysis(
             roi_vs_avg = (profit_vs_avg / annual_rent_avg * 100) if annual_rent_avg > 0 else 0
             roi_vs_bottom = (profit_vs_bottom / annual_rent_bottom * 100) if annual_rent_bottom > 0 else 0
             
+            # Get enhanced analysis with AI commentary
+            analysis = analyze_opportunity(
+                airdna_annual=airdna_annual,
+                bottom_rent=bottom_avg,
+                avg_rent=avg_price,
+                listing_count=len(listings),
+                bedrooms=br,
+                airdna_count=airdna_count
+            )
+            
             results.append(DiscrepancyResult(
                 city=city_obj.city,
                 state=city_obj.state,
@@ -853,9 +1058,25 @@ def get_discrepancy_analysis(
                 annual_profit_vs_bottom=round(profit_vs_bottom, 2),
                 roi_vs_avg=round(roi_vs_avg, 2),
                 roi_vs_bottom=round(roi_vs_bottom, 2),
+                # Enhanced metrics
+                estimated_occupancy_rate=analysis["estimated_occupancy_rate"],
+                adjusted_annual_revenue=analysis["adjusted_annual_revenue"],
+                estimated_annual_expenses=analysis["estimated_annual_expenses"],
+                net_annual_profit=analysis["net_annual_profit"],
+                net_monthly_cashflow=analysis["net_monthly_cashflow"],
+                break_even_occupancy=analysis["break_even_occupancy"],
+                expense_ratio=analysis["expense_ratio"],
+                data_confidence=analysis["data_confidence"],
+                airdna_data_count=airdna_count,
+                # AI Commentary
+                opportunity_score=analysis["opportunity_score"],
+                strengths=analysis["strengths"],
+                weaknesses=analysis["weaknesses"],
+                recommendation=analysis["recommendation"],
             ))
     
-    results.sort(key=lambda x: x.annual_profit_vs_bottom, reverse=True)
+    # Sort by opportunity score (highest first)
+    results.sort(key=lambda x: x.opportunity_score, reverse=True)
     return results
 
 
