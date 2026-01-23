@@ -137,6 +137,34 @@ For each Zillow listing:
 - Square footage
 - Zillow URL
 
+## Railway Deployment
+
+This is a monorepo with separate backend and frontend services. Deploy each as a separate Railway service:
+
+### Backend Service (Python/FastAPI)
+
+1. Create a new Railway service from GitHub
+2. **Set Root Directory to: `backend`**
+3. Add environment variable: `SCRAPER_API_KEY=your_key`
+4. Railway will auto-detect Python and use the Procfile
+
+### Frontend Service (Next.js)
+
+1. Create another Railway service from the same GitHub repo
+2. **Set Root Directory to: `frontend`**
+3. Add environment variable: `BACKEND_URL=https://your-backend.railway.app`
+4. Railway will auto-detect Node.js and build Next.js
+
+### Environment Variables
+
+**Backend:**
+- `SCRAPER_API_KEY` - Your ScraperAPI key
+- `PORT` - Set automatically by Railway
+
+**Frontend:**
+- `BACKEND_URL` - URL of the deployed backend service
+- `PORT` - Set automatically by Railway
+
 ## Disclaimer
 
 This tool is for educational and research purposes. Scraping websites may violate their Terms of Service. Use responsibly and respect rate limits. The accuracy of arbitrage calculations depends on the quality of AirDNA data entered.
