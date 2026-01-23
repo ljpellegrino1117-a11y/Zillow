@@ -8,6 +8,9 @@ class CityBase(BaseModel):
     city: str
     state: str
     zip_code: Optional[str] = None  # Optional zip code to narrow search
+    include_surrounding: bool = False  # Include surrounding cities
+    surrounding_miles: Optional[int] = None  # Radius in miles
+    surrounding_only: bool = False  # ONLY surrounding, exclude main city
 
 
 class CityCreate(CityBase):
@@ -152,6 +155,9 @@ class ScrapeRequest(BaseModel):
     city: str
     state: str
     zip_code: Optional[str] = None  # Optional zip code to narrow search
+    include_surrounding: bool = False  # Include surrounding cities
+    surrounding_miles: Optional[int] = None  # Radius in miles
+    surrounding_only: bool = False  # ONLY surrounding, exclude main city
     min_bedrooms: int = 3
     max_bedrooms: int = 8
 

@@ -102,13 +102,29 @@ def delete_city(city: str, state: str, zip_code: Optional[str] = None, db: Sessi
 
 # ==================== Scraping Endpoints ====================
 
-async def run_scrape_job(city: str, state: str, min_bedrooms: int, max_bedrooms: int, db_session_factory, zip_code: str = None):
+async def run_scrape_job(
+    city: str, 
+    state: str, 
+    min_bedrooms: int, 
+    max_bedrooms: int, 
+    db_session_factory, 
+    zip_code: str = None,
+    include_surrounding: bool = False,
+    surrounding_miles: int = None,
+    surrounding_only: bool = False
+):
     """Background task to run scraping job."""
     job_key = f"{city}_{state}" + (f"_{zip_code}" if zip_code else "")
     scrape_jobs[job_key] = {"status": "running", "listings_found": 0, "message": "Scraping in progress..."}
     
     try:
-        listings = await scrape_zillow(city, state, min_bedrooms, max_bedrooms, zip_code=zip_code)
+        listings = await scrape_zillow(
+            city, state, min_bedrooms, max_bedrooms, 
+            zip_code=zip_code,
+            include_surrounding=include_surrounding,
+            surrounding_miles=surrounding_miles,
+            surrounding_only=surrounding_only
+        )
         
         db = db_session_factory()
         try:
@@ -212,7 +228,7 @@ async def run_scrape_job(city: str, state: str, min_bedrooms: int, max_bedrooms:
 
 @app.post("/api/scrape", response_model=ScrapeStatus)
 async def start_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Start a scraping job for a city (optionally filtered by zip code)."""
+    """Start a scraping job for a city (optionally filtered by zip code or surrounding cities)."""
     from .database import SessionLocal
     
     job_key = f"{request.city}_{request.state}" + (f"_{request.zip_code}" if request.zip_code else "")
@@ -225,6 +241,14 @@ async def start_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks
             message="Scrape already in progress"
         )
     
+    # Build message based on options
+    if request.surrounding_only and request.surrounding_miles:
+        message = f"Starting scrape for surrounding cities within {request.surrounding_miles} miles (excluding {request.city})"
+    elif request.include_surrounding and request.surrounding_miles:
+        message = f"Starting scrape for {request.city} + surrounding cities within {request.surrounding_miles} miles"
+    else:
+        message = "Starting scrape..."
+    
     background_tasks.add_task(
         run_scrape_job,
         request.city,
@@ -232,17 +256,20 @@ async def start_scrape(request: ScrapeRequest, background_tasks: BackgroundTasks
         request.min_bedrooms,
         request.max_bedrooms,
         SessionLocal,
-        request.zip_code
+        request.zip_code,
+        request.include_surrounding,
+        request.surrounding_miles,
+        request.surrounding_only
     )
     
-    scrape_jobs[job_key] = {"status": "running", "listings_found": 0, "message": "Starting scrape..."}
+    scrape_jobs[job_key] = {"status": "running", "listings_found": 0, "message": message}
     
     return ScrapeStatus(
         city=request.city,
         state=request.state,
         zip_code=request.zip_code,
         status="running",
-        message="Scrape job started"
+        message=message
     )
 
 

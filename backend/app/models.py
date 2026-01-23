@@ -11,6 +11,10 @@ class City(Base):
     city = Column(String(100), nullable=False)
     state = Column(String(50), nullable=False)
     zip_code = Column(String(10), nullable=True)  # Optional zip code to narrow search
+    # Surrounding cities options
+    include_surrounding = Column(Boolean, default=False)  # Include surrounding cities
+    surrounding_miles = Column(Integer, nullable=True)  # Radius in miles
+    surrounding_only = Column(Boolean, default=False)  # ONLY surrounding, exclude main city
     created_at = Column(DateTime, default=datetime.utcnow)
     last_scraped = Column(DateTime)
 

@@ -910,7 +910,10 @@ class ZillowScraperAPI:
         max_bedrooms: int = 8,
         max_pages_per_bedroom: int = 10,
         include_for_sale_creative: bool = True,
-        zip_code: str = None
+        zip_code: str = None,
+        include_surrounding: bool = False,
+        surrounding_miles: int = None,
+        surrounding_only: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Scrape rental listings and optionally for-sale listings with creative financing.
@@ -923,40 +926,94 @@ class ZillowScraperAPI:
             max_pages_per_bedroom: Max pages per bedroom count
             include_for_sale_creative: Also scrape for-sale with creative financing terms
             zip_code: Optional zip code to narrow search
+            include_surrounding: Include surrounding cities within radius
+            surrounding_miles: Radius in miles for surrounding cities
+            surrounding_only: ONLY search surrounding cities, exclude main city
             
         Returns:
             List of listing dictionaries
         """
         all_listings = []
         seen_ids = set()
-        location_label = f"{city}, {state}" + (f" ({zip_code})" if zip_code else "")
         
-        # 1. Scrape RENTAL listings
-        logger.info(f"=== Scraping RENTAL listings for {location_label} ===")
-        rentals = await self._scrape_listing_type(
-            city, state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
-            listing_type='rental',
-            seen_ids=seen_ids,
-            filter_creative_financing=False,
-            zip_code=zip_code
-        )
-        all_listings.extend(rentals)
-        logger.info(f"Found {len(rentals)} rental listings")
+        # Determine which cities to scrape
+        cities_to_scrape = []
         
-        # 2. Scrape FOR SALE listings (only keep creative financing)
-        if include_for_sale_creative:
-            logger.info(f"\n=== Scraping FOR SALE listings (creative financing only) for {location_label} ===")
-            for_sale = await self._scrape_listing_type(
-                city, state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
-                listing_type='for_sale',
+        if include_surrounding and surrounding_miles:
+            # Get nearby cities using geocoding
+            from .geocoding import get_nearby_cities
+            try:
+                nearby = await get_nearby_cities(
+                    city, state, surrounding_miles, 
+                    exclude_center=surrounding_only
+                )
+                cities_to_scrape = nearby
+                logger.info(f"Found {len(cities_to_scrape)} cities within {surrounding_miles} miles of {city}, {state}")
+                for c in cities_to_scrape:
+                    dist = c.get('distance', 0)
+                    logger.info(f"  - {c['city']}, {c['state']} ({dist} miles)")
+            except Exception as e:
+                logger.error(f"Error getting nearby cities: {e}")
+                if not surrounding_only:
+                    cities_to_scrape = [{"city": city, "state": state}]
+        else:
+            cities_to_scrape = [{"city": city, "state": state}]
+        
+        if not cities_to_scrape:
+            logger.warning("No cities to scrape")
+            return []
+        
+        # Scrape each city
+        for city_info in cities_to_scrape:
+            scrape_city = city_info["city"]
+            scrape_state = city_info["state"]
+            distance = city_info.get("distance", 0)
+            
+            location_label = f"{scrape_city}, {scrape_state}"
+            if distance > 0:
+                location_label += f" ({distance} mi away)"
+            if zip_code and distance == 0:
+                location_label += f" ({zip_code})"
+            
+            logger.info(f"\n{'='*50}")
+            logger.info(f"Scraping: {location_label}")
+            logger.info(f"{'='*50}")
+            
+            # Only use zip_code for the main city
+            use_zip = zip_code if distance == 0 else None
+            
+            # 1. Scrape RENTAL listings
+            logger.info(f"=== Scraping RENTAL listings for {location_label} ===")
+            rentals = await self._scrape_listing_type(
+                scrape_city, scrape_state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
+                listing_type='rental',
                 seen_ids=seen_ids,
-                filter_creative_financing=True,  # Only keep listings with creative financing terms
-                zip_code=zip_code
+                filter_creative_financing=False,
+                zip_code=use_zip
             )
-            all_listings.extend(for_sale)
-            logger.info(f"Found {len(for_sale)} for-sale listings with creative financing")
+            all_listings.extend(rentals)
+            logger.info(f"Found {len(rentals)} rental listings")
+            
+            # 2. Scrape FOR SALE listings (only keep creative financing)
+            if include_for_sale_creative:
+                logger.info(f"=== Scraping FOR SALE listings (creative financing only) for {location_label} ===")
+                for_sale = await self._scrape_listing_type(
+                    scrape_city, scrape_state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
+                    listing_type='for_sale',
+                    seen_ids=seen_ids,
+                    filter_creative_financing=True,
+                    zip_code=use_zip
+                )
+                all_listings.extend(for_sale)
+                logger.info(f"Found {len(for_sale)} for-sale listings with creative financing")
+            
+            # Small delay between cities
+            if len(cities_to_scrape) > 1:
+                await asyncio.sleep(2)
         
-        logger.info(f"\nTotal: {len(all_listings)} listings for {location_label}")
+        logger.info(f"\n{'='*50}")
+        logger.info(f"TOTAL: {len(all_listings)} listings from {len(cities_to_scrape)} cities")
+        logger.info(f"{'='*50}")
         return all_listings
 
 
@@ -967,7 +1024,10 @@ async def scrape_zillow(
     max_bedrooms: int = 8,
     api_key: Optional[str] = None,
     on_listing_found: Optional[Callable[[Dict], None]] = None,
-    zip_code: Optional[str] = None
+    zip_code: Optional[str] = None,
+    include_surrounding: bool = False,
+    surrounding_miles: Optional[int] = None,
+    surrounding_only: bool = False
 ) -> List[Dict[str, Any]]:
     """
     Main entry point for scraping Zillow.
@@ -980,12 +1040,21 @@ async def scrape_zillow(
         api_key: ScraperAPI key (optional)
         on_listing_found: Optional callback
         zip_code: Optional zip code to narrow search
+        include_surrounding: Include surrounding cities within radius
+        surrounding_miles: Radius in miles for surrounding cities
+        surrounding_only: ONLY search surrounding cities, exclude main city
         
     Returns:
         List of listing dictionaries
     """
     async with ZillowScraperAPI(api_key=api_key, on_listing_found=on_listing_found) as scraper:
-        return await scraper.scrape_city(city, state, min_bedrooms, max_bedrooms, zip_code=zip_code)
+        return await scraper.scrape_city(
+            city, state, min_bedrooms, max_bedrooms, 
+            zip_code=zip_code,
+            include_surrounding=include_surrounding,
+            surrounding_miles=surrounding_miles,
+            surrounding_only=surrounding_only
+        )
 
 
 # CLI for testing

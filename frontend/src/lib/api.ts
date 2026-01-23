@@ -7,6 +7,9 @@ export interface City {
   city: string;
   state: string;
   zip_code: string | null;
+  include_surrounding: boolean;
+  surrounding_miles: number | null;
+  surrounding_only: boolean;
   created_at: string;
   last_scraped: string | null;
 }
@@ -138,11 +141,23 @@ export const getCities = async (): Promise<City[]> => {
   return response.data;
 };
 
-export const createCity = async (city: string, state: string, zipCode?: string): Promise<City> => {
+export interface CreateCityParams {
+  city: string;
+  state: string;
+  zipCode?: string;
+  includeSurrounding?: boolean;
+  surroundingMiles?: number;
+  surroundingOnly?: boolean;
+}
+
+export const createCity = async (params: CreateCityParams): Promise<City> => {
   const response = await axios.post(`${API_BASE}/cities`, { 
-    city, 
-    state,
-    zip_code: zipCode || null
+    city: params.city, 
+    state: params.state,
+    zip_code: params.zipCode || null,
+    include_surrounding: params.includeSurrounding || false,
+    surrounding_miles: params.surroundingMiles || null,
+    surrounding_only: params.surroundingOnly || false
   });
   return response.data;
 };
@@ -153,13 +168,27 @@ export const deleteCity = async (city: string, state: string, zipCode?: string):
 };
 
 // Scraping API
-export const startScrape = async (city: string, state: string, minBedrooms = 3, maxBedrooms = 8, zipCode?: string): Promise<ScrapeStatus> => {
+export interface StartScrapeParams {
+  city: string;
+  state: string;
+  minBedrooms?: number;
+  maxBedrooms?: number;
+  zipCode?: string;
+  includeSurrounding?: boolean;
+  surroundingMiles?: number;
+  surroundingOnly?: boolean;
+}
+
+export const startScrape = async (params: StartScrapeParams): Promise<ScrapeStatus> => {
   const response = await axios.post(`${API_BASE}/scrape`, {
-    city,
-    state,
-    zip_code: zipCode || null,
-    min_bedrooms: minBedrooms,
-    max_bedrooms: maxBedrooms,
+    city: params.city,
+    state: params.state,
+    zip_code: params.zipCode || null,
+    min_bedrooms: params.minBedrooms || 3,
+    max_bedrooms: params.maxBedrooms || 8,
+    include_surrounding: params.includeSurrounding || false,
+    surrounding_miles: params.surroundingMiles || null,
+    surrounding_only: params.surroundingOnly || false,
   });
   return response.data;
 };

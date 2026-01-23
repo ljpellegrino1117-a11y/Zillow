@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, RefreshCw, MapPin, Clock, Loader2 } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, MapPin, Clock, Loader2, Map } from 'lucide-react';
 import { 
   City, 
   getCities, 
@@ -30,6 +30,9 @@ export default function CityManager({ onCityChange }: Props) {
   const [newCity, setNewCity] = useState('');
   const [newState, setNewState] = useState('');
   const [newZipCode, setNewZipCode] = useState('');
+  const [includeSurrounding, setIncludeSurrounding] = useState(false);
+  const [surroundingMiles, setSurroundingMiles] = useState<number>(25);
+  const [surroundingOnly, setSurroundingOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [scrapeStatuses, setScrapeStatuses] = useState<Record<string, ScrapeStatus>>({});
 
@@ -83,10 +86,20 @@ export default function CityManager({ onCityChange }: Props) {
     if (!newCity.trim() || !newState.trim()) return;
 
     try {
-      await createCity(newCity.trim(), newState.trim(), newZipCode.trim() || undefined);
+      await createCity({
+        city: newCity.trim(),
+        state: newState.trim(),
+        zipCode: newZipCode.trim() || undefined,
+        includeSurrounding,
+        surroundingMiles: includeSurrounding ? surroundingMiles : undefined,
+        surroundingOnly: includeSurrounding ? surroundingOnly : false
+      });
       setNewCity('');
       setNewState('');
       setNewZipCode('');
+      setIncludeSurrounding(false);
+      setSurroundingMiles(25);
+      setSurroundingOnly(false);
       await fetchCities();
       onCityChange?.();
     } catch (error) {
@@ -107,18 +120,25 @@ export default function CityManager({ onCityChange }: Props) {
     }
   };
 
-  const handleStartScrape = async (city: string, state: string, zipCode?: string | null) => {
-    const key = `${city}_${state}` + (zipCode ? `_${zipCode}` : '');
+  const handleStartScrape = async (c: City) => {
+    const key = `${c.city}_${c.state}` + (c.zip_code ? `_${c.zip_code}` : '');
     try {
-      const status = await startScrape(city, state, 3, 8, zipCode || undefined);
+      const status = await startScrape({
+        city: c.city,
+        state: c.state,
+        zipCode: c.zip_code || undefined,
+        includeSurrounding: c.include_surrounding,
+        surroundingMiles: c.surrounding_miles || undefined,
+        surroundingOnly: c.surrounding_only
+      });
       setScrapeStatuses(prev => ({ ...prev, [key]: status }));
     } catch (error) {
       console.error('Failed to start scrape:', error);
     }
   };
 
-  const getScrapeStatusBadge = (city: string, state: string, zipCode?: string | null) => {
-    const key = `${city}_${state}` + (zipCode ? `_${zipCode}` : '');
+  const getScrapeStatusBadge = (c: City) => {
+    const key = `${c.city}_${c.state}` + (c.zip_code ? `_${c.zip_code}` : '');
     const status = scrapeStatuses[key];
     if (!status) return null;
 
@@ -147,6 +167,16 @@ export default function CityManager({ onCityChange }: Props) {
     }
   };
 
+  const getLocationDescription = (c: City) => {
+    let desc = '';
+    if (c.surrounding_only && c.surrounding_miles) {
+      desc = `Surrounding only (${c.surrounding_miles} mi)`;
+    } else if (c.include_surrounding && c.surrounding_miles) {
+      desc = `+ ${c.surrounding_miles} mi radius`;
+    }
+    return desc;
+  };
+
   if (loading) {
     return (
       <div className="card">
@@ -165,7 +195,7 @@ export default function CityManager({ onCityChange }: Props) {
       </h2>
 
       {/* Add new city form */}
-      <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+      <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <label className="input-label">City*</label>
@@ -212,8 +242,71 @@ export default function CityManager({ onCityChange }: Props) {
             </button>
           </div>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          Add a city to search. Optionally specify a zip code to narrow results to that area.
+
+        {/* Surrounding cities options */}
+        <div className="border-t border-gray-200 pt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Map className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-medium text-gray-700">Surrounding Cities</span>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeSurrounding}
+                onChange={(e) => {
+                  setIncludeSurrounding(e.target.checked);
+                  if (!e.target.checked) {
+                    setSurroundingOnly(false);
+                  }
+                }}
+                className="rounded text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Include surrounding cities within</span>
+            </label>
+            
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={surroundingMiles}
+                onChange={(e) => setSurroundingMiles(Math.max(1, Math.min(100, parseInt(e.target.value) || 25)))}
+                disabled={!includeSurrounding}
+                className="input w-20 text-center"
+                min={1}
+                max={100}
+              />
+              <span className="text-sm text-gray-700">miles</span>
+            </div>
+
+            <div className="border-l border-gray-300 pl-4 ml-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={surroundingOnly}
+                  onChange={(e) => setSurroundingOnly(e.target.checked)}
+                  disabled={!includeSurrounding}
+                  className="rounded text-orange-600 focus:ring-orange-500"
+                />
+                <span className={`text-sm ${!includeSurrounding ? 'text-gray-400' : 'text-orange-700 font-medium'}`}>
+                  ONLY surrounding (exclude main city)
+                </span>
+              </label>
+            </div>
+          </div>
+          
+          {includeSurrounding && (
+            <p className="text-xs text-gray-500 mt-2">
+              {surroundingOnly 
+                ? `Will search cities within ${surroundingMiles} miles, but NOT include ${newCity || 'the main city'} itself.`
+                : `Will search ${newCity || 'the main city'} AND surrounding cities within ${surroundingMiles} miles.`
+              }
+            </p>
+          )}
+        </div>
+        
+        <p className="text-xs text-gray-500">
+          Add a city to search. Optionally specify a zip code to narrow results or include surrounding cities.
         </p>
       </div>
 
@@ -231,7 +324,7 @@ export default function CityManager({ onCityChange }: Props) {
                   Location
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
-                  Zip Code
+                  Zip / Radius
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
                   Last Scraped
@@ -248,15 +341,26 @@ export default function CityManager({ onCityChange }: Props) {
               {cities.map((c) => {
                 const key = `${c.city}_${c.state}` + (c.zip_code ? `_${c.zip_code}` : '');
                 const isRunning = scrapeStatuses[key]?.status === 'running';
+                const locationDesc = getLocationDescription(c);
                 return (
                   <tr key={c.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">
-                      {c.city}, {c.state}
+                      <div>{c.city}, {c.state}</div>
+                      {locationDesc && (
+                        <div className="text-xs text-blue-600 flex items-center gap-1">
+                          <Map className="h-3 w-3" />
+                          {locationDesc}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
                       {c.zip_code ? (
                         <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-sm font-medium">
                           {c.zip_code}
+                        </span>
+                      ) : c.include_surrounding && c.surrounding_miles ? (
+                        <span className={`px-2 py-0.5 rounded text-sm font-medium ${c.surrounding_only ? 'bg-orange-50 text-orange-700' : 'bg-green-50 text-green-700'}`}>
+                          {c.surrounding_only ? 'Surrounding only' : 'City + area'}
                         </span>
                       ) : (
                         <span className="text-gray-400 text-sm">All areas</span>
@@ -273,12 +377,12 @@ export default function CityManager({ onCityChange }: Props) {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {getScrapeStatusBadge(c.city, c.state, c.zip_code)}
+                      {getScrapeStatusBadge(c)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => handleStartScrape(c.city, c.state, c.zip_code)}
+                          onClick={() => handleStartScrape(c)}
                           disabled={isRunning}
                           className="btn-secondary text-xs py-1 px-2"
                           title="Scrape Zillow"
