@@ -360,7 +360,16 @@ class ZillowScraperAPI:
     - Rotating proxies (avoid IP bans)
     - CAPTCHA solving (bypass bot detection)
     - Automatic retries
+    
+    Performance optimizations:
+    - Concurrent bedroom count scraping
+    - Concurrent page fetching within limits
+    - Reduced delays between requests
     """
+    
+    # Concurrency settings
+    MAX_CONCURRENT_REQUESTS = 5  # Max simultaneous requests to ScraperAPI
+    MAX_CONCURRENT_BEDROOMS = 3  # Scrape this many bedroom counts at once
     
     def __init__(
         self, 
@@ -375,9 +384,11 @@ class ZillowScraperAPI:
             )
         self.on_listing_found = on_listing_found
         self.client: Optional[httpx.AsyncClient] = None
+        self.semaphore: Optional[asyncio.Semaphore] = None
     
     async def __aenter__(self):
         self.client = httpx.AsyncClient(timeout=60.0)
+        self.semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_REQUESTS)
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -424,7 +435,7 @@ class ZillowScraperAPI:
         return base
     
     async def _fetch_page(self, url: str, max_retries: int = 3) -> Optional[str]:
-        """Fetch a page using ScraperAPI."""
+        """Fetch a page using ScraperAPI with concurrency control."""
         params = {
             "api_key": self.api_key,
             "url": url,
@@ -432,36 +443,37 @@ class ZillowScraperAPI:
             "country_code": "us",
         }
         
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"  Fetching (attempt {attempt + 1}): {url}")
-                
-                response = await self.client.get(
-                    SCRAPER_API_URL, 
-                    params=params,
-                    timeout=60.0
-                )
-                
-                if response.status_code == 200:
-                    return response.text
-                elif response.status_code == 403:
-                    logger.warning(f"  Access denied (403)")
-                    return None
-                elif response.status_code == 429:
-                    logger.warning(f"  Rate limited (429). Waiting...")
-                    await asyncio.sleep(5 * (attempt + 1))
-                elif response.status_code == 500:
-                    logger.warning(f"  Server error (500). Retrying...")
-                    await asyncio.sleep(2 * (attempt + 1))
-                else:
-                    logger.warning(f"  Unexpected status: {response.status_code}")
+        async with self.semaphore:  # Limit concurrent requests
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"  Fetching: {url[:80]}...")
                     
-            except httpx.TimeoutException:
-                logger.warning(f"  Timeout on attempt {attempt + 1}")
-                await asyncio.sleep(2)
-            except Exception as e:
-                logger.error(f"  Error fetching page: {e}")
-                await asyncio.sleep(2)
+                    response = await self.client.get(
+                        SCRAPER_API_URL, 
+                        params=params,
+                        timeout=60.0
+                    )
+                    
+                    if response.status_code == 200:
+                        return response.text
+                    elif response.status_code == 403:
+                        logger.warning(f"  Access denied (403)")
+                        return None
+                    elif response.status_code == 429:
+                        logger.warning(f"  Rate limited (429). Waiting...")
+                        await asyncio.sleep(3 * (attempt + 1))
+                    elif response.status_code == 500:
+                        logger.warning(f"  Server error (500). Retrying...")
+                        await asyncio.sleep(1 * (attempt + 1))
+                    else:
+                        logger.warning(f"  Unexpected status: {response.status_code}")
+                        
+                except httpx.TimeoutException:
+                    logger.warning(f"  Timeout on attempt {attempt + 1}")
+                    await asyncio.sleep(1)
+                except Exception as e:
+                    logger.error(f"  Error fetching page: {e}")
+                    await asyncio.sleep(1)
         
         return None
     
@@ -806,6 +818,88 @@ class ZillowScraperAPI:
                     return min(max(pages), 20)
         return 1
     
+    async def _scrape_bedroom_count(
+        self,
+        city: str,
+        state: str,
+        bedrooms: int,
+        max_pages: int,
+        listing_type: str,
+        seen_ids: set,
+        filter_creative_financing: bool = False,
+        zip_code: str = None
+    ) -> List[Dict[str, Any]]:
+        """Scrape listings for a single bedroom count."""
+        listings_found = []
+        type_label = "SALE" if listing_type == 'for_sale' else "RENT"
+        location_label = f"{city}, {state}" + (f" ({zip_code})" if zip_code else "")
+        
+        logger.info(f"  [{type_label}] {bedrooms}BR in {location_label}...")
+        
+        page = 1
+        empty_pages = 0
+        
+        while page <= max_pages:
+            url = self._build_zillow_url(city, state, bedrooms, page, listing_type, zip_code)
+            html = await self._fetch_page(url)
+            
+            if not html:
+                break
+            
+            if self._check_no_results(html):
+                break
+            
+            listings = self._extract_listings_from_html(html, city, state, listing_type)
+            
+            if not listings:
+                empty_pages += 1
+                if empty_pages >= 2:
+                    break
+                page += 1
+                continue
+            
+            empty_pages = 0
+            new_count = 0
+            
+            for listing in listings:
+                lid = listing.get('zillow_id')
+                if lid and lid not in seen_ids:
+                    if not listing.get('bedrooms'):
+                        listing['bedrooms'] = bedrooms
+                    
+                    if listing['bedrooms'] == bedrooms or listing['bedrooms'] == 0:
+                        if listing['bedrooms'] == 0:
+                            listing['bedrooms'] = bedrooms
+                        
+                        # For for-sale listings, only keep if has creative financing
+                        if filter_creative_financing and not listing.get('has_creative_financing'):
+                            continue
+                        
+                        seen_ids.add(lid)
+                        listings_found.append(listing)
+                        new_count += 1
+                        
+                        if self.on_listing_found:
+                            try:
+                                self.on_listing_found(listing)
+                            except Exception as e:
+                                logger.error(f"Callback error: {e}")
+            
+            if new_count == 0:
+                empty_pages += 1
+                if empty_pages >= 2:
+                    break
+            
+            soup = BeautifulSoup(html, 'lxml')
+            total_pages = self._get_page_count(soup)
+            if page >= total_pages:
+                break
+            
+            page += 1
+        
+        logger.info(f"  [{type_label}] {bedrooms}BR: {len(listings_found)} listings")
+        return listings_found
+
     async def _scrape_listing_type(
         self,
         city: str,
@@ -820,83 +914,35 @@ class ZillowScraperAPI:
     ) -> List[Dict[str, Any]]:
         """
         Scrape listings of a specific type (rental or for_sale).
+        Uses concurrent scraping for different bedroom counts.
         """
         all_listings = []
         type_label = "FOR SALE" if listing_type == 'for_sale' else "RENTALS"
         location_label = f"{city}, {state}" + (f" ({zip_code})" if zip_code else "")
         
-        for bedrooms in range(min_bedrooms, max_bedrooms + 1):
-            logger.info(f"Scraping {location_label} [{type_label}] - {bedrooms} bedrooms...")
+        logger.info(f"Scraping {location_label} [{type_label}] - {min_bedrooms}-{max_bedrooms} BR (concurrent)...")
+        
+        bedroom_range = list(range(min_bedrooms, max_bedrooms + 1))
+        
+        # Scrape bedroom counts in batches for concurrency
+        for i in range(0, len(bedroom_range), self.MAX_CONCURRENT_BEDROOMS):
+            batch = bedroom_range[i:i + self.MAX_CONCURRENT_BEDROOMS]
             
-            page = 1
-            empty_pages = 0
+            # Create tasks for each bedroom count in this batch
+            tasks = [
+                self._scrape_bedroom_count(
+                    city, state, bedrooms, max_pages_per_bedroom,
+                    listing_type, seen_ids, filter_creative_financing, zip_code
+                )
+                for bedrooms in batch
+            ]
             
-            while page <= max_pages_per_bedroom:
-                url = self._build_zillow_url(city, state, bedrooms, page, listing_type, zip_code)
-                html = await self._fetch_page(url)
-                
-                if not html:
-                    logger.warning(f"  Failed to fetch page {page}")
-                    break
-                
-                if self._check_no_results(html):
-                    logger.info(f"  No results for {bedrooms} BR")
-                    break
-                
-                listings = self._extract_listings_from_html(html, city, state, listing_type)
-                
-                if not listings:
-                    empty_pages += 1
-                    if empty_pages >= 2:
-                        logger.info(f"  No listings for 2 pages, moving on")
-                        break
-                    page += 1
-                    await asyncio.sleep(1)
-                    continue
-                
-                empty_pages = 0
-                new_count = 0
-                
-                for listing in listings:
-                    lid = listing.get('zillow_id')
-                    if lid and lid not in seen_ids:
-                        if not listing.get('bedrooms'):
-                            listing['bedrooms'] = bedrooms
-                        
-                        if listing['bedrooms'] == bedrooms or listing['bedrooms'] == 0:
-                            if listing['bedrooms'] == 0:
-                                listing['bedrooms'] = bedrooms
-                            
-                            # For for-sale listings, only keep if has creative financing
-                            if filter_creative_financing and not listing.get('has_creative_financing'):
-                                continue
-                            
-                            seen_ids.add(lid)
-                            all_listings.append(listing)
-                            new_count += 1
-                            
-                            if self.on_listing_found:
-                                try:
-                                    self.on_listing_found(listing)
-                                except Exception as e:
-                                    logger.error(f"Callback error: {e}")
-                
-                logger.info(f"  Page {page}: {new_count} new listings (total: {len(all_listings)})")
-                
-                if new_count == 0:
-                    empty_pages += 1
-                    if empty_pages >= 2:
-                        break
-                
-                soup = BeautifulSoup(html, 'lxml')
-                total_pages = self._get_page_count(soup)
-                if page >= total_pages:
-                    break
-                
-                page += 1
-                await asyncio.sleep(1)
+            # Run concurrently
+            results = await asyncio.gather(*tasks)
             
-            await asyncio.sleep(2)
+            # Collect results
+            for listings in results:
+                all_listings.extend(listings)
         
         return all_listings
     
@@ -961,27 +1007,23 @@ class ZillowScraperAPI:
             logger.warning("No cities to scrape")
             return []
         
-        # Scrape each city
-        for city_info in cities_to_scrape:
+        async def scrape_single_city(city_info: Dict) -> List[Dict[str, Any]]:
+            """Scrape a single city (rentals + optional for-sale)."""
+            city_listings = []
             scrape_city = city_info["city"]
             scrape_state = city_info["state"]
             distance = city_info.get("distance", 0)
             
             location_label = f"{scrape_city}, {scrape_state}"
             if distance > 0:
-                location_label += f" ({distance} mi away)"
-            if zip_code and distance == 0:
-                location_label += f" ({zip_code})"
+                location_label += f" ({distance} mi)"
             
-            logger.info(f"\n{'='*50}")
-            logger.info(f"Scraping: {location_label}")
-            logger.info(f"{'='*50}")
+            logger.info(f"\n>>> Scraping: {location_label}")
             
             # Only use zip_code for the main city
             use_zip = zip_code if distance == 0 else None
             
             # 1. Scrape RENTAL listings
-            logger.info(f"=== Scraping RENTAL listings for {location_label} ===")
             rentals = await self._scrape_listing_type(
                 scrape_city, scrape_state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
                 listing_type='rental',
@@ -989,12 +1031,10 @@ class ZillowScraperAPI:
                 filter_creative_financing=False,
                 zip_code=use_zip
             )
-            all_listings.extend(rentals)
-            logger.info(f"Found {len(rentals)} rental listings")
+            city_listings.extend(rentals)
             
             # 2. Scrape FOR SALE listings (only keep creative financing)
             if include_for_sale_creative:
-                logger.info(f"=== Scraping FOR SALE listings (creative financing only) for {location_label} ===")
                 for_sale = await self._scrape_listing_type(
                     scrape_city, scrape_state, min_bedrooms, max_bedrooms, max_pages_per_bedroom,
                     listing_type='for_sale',
@@ -1002,12 +1042,27 @@ class ZillowScraperAPI:
                     filter_creative_financing=True,
                     zip_code=use_zip
                 )
-                all_listings.extend(for_sale)
-                logger.info(f"Found {len(for_sale)} for-sale listings with creative financing")
+                city_listings.extend(for_sale)
             
-            # Small delay between cities
-            if len(cities_to_scrape) > 1:
-                await asyncio.sleep(2)
+            logger.info(f"<<< {location_label}: {len(city_listings)} total listings")
+            return city_listings
+        
+        # Scrape cities - can do 2 cities at a time
+        MAX_CONCURRENT_CITIES = 2
+        
+        for i in range(0, len(cities_to_scrape), MAX_CONCURRENT_CITIES):
+            batch = cities_to_scrape[i:i + MAX_CONCURRENT_CITIES]
+            
+            if len(batch) == 1:
+                # Single city, just run it
+                listings = await scrape_single_city(batch[0])
+                all_listings.extend(listings)
+            else:
+                # Multiple cities, run concurrently
+                tasks = [scrape_single_city(city_info) for city_info in batch]
+                results = await asyncio.gather(*tasks)
+                for listings in results:
+                    all_listings.extend(listings)
         
         logger.info(f"\n{'='*50}")
         logger.info(f"TOTAL: {len(all_listings)} listings from {len(cities_to_scrape)} cities")
