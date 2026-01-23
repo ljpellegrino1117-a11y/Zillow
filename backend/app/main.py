@@ -1465,7 +1465,6 @@ def get_ai_analysis(analysis_id: int, db: Session = Depends(get_db)):
 @app.post("/api/airbtics/sync")
 async def sync_airbtics_data(
     request: AirbticsSyncRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
@@ -1480,11 +1479,12 @@ async def sync_airbtics_data(
             detail="Sync already in progress"
         )
     
-    # Run sync in background
+    # Run sync in background using asyncio.create_task
     async def run_sync():
         from .database import SessionLocal
         db_session = SessionLocal()
         try:
+            logger.info(f"Starting Airbtics sync for city_ids={request.city_ids}, force_refresh={request.force_refresh}")
             await airbtics.sync_all_cities(
                 db_session,
                 city_ids=request.city_ids,
@@ -1493,10 +1493,14 @@ async def sync_airbtics_data(
             # Invalidate caches after sync
             analysis_cache.invalidate()
             listings_cache.invalidate()
+            logger.info("Airbtics sync completed")
+        except Exception as e:
+            logger.error(f"Airbtics sync error: {e}")
         finally:
             db_session.close()
     
-    background_tasks.add_task(lambda: asyncio.create_task(run_sync()))
+    # Create the task to run in background
+    asyncio.create_task(run_sync())
     
     return {
         "message": "Sync started",

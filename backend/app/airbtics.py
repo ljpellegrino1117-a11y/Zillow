@@ -94,8 +94,19 @@ async def search_market(
             
             if response.status_code == 200:
                 data = response.json()
+                
+                # Check for API error messages
+                if isinstance(data, dict) and "message" in data:
+                    error_msg = data.get("message", "")
+                    if "insufficient_credits" in error_msg.lower() or "credit" in error_msg.lower():
+                        logger.error(f"Airbtics API: Insufficient credits. Please add credits to your Airbtics account.")
+                        return None
+                    if "invalid" in error_msg.lower() or "unauthorized" in error_msg.lower():
+                        logger.error(f"Airbtics API: Invalid API key or unauthorized")
+                        return None
+                
                 # Response should be a list of markets
-                markets = data if isinstance(data, list) else data.get("markets", [])
+                markets = data if isinstance(data, list) else data.get("markets", data.get("data", []))
                 
                 if markets and len(markets) > 0:
                     # Return the first/best match
