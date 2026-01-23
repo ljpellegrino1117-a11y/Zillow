@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Save, DollarSign, Loader2, Trash2, Plus, Check, X, Minus, Upload, Camera, MessageSquare, Send, Image as ImageIcon, History, ChevronDown, ChevronUp, Calendar, Zap, RefreshCw, Cloud, Database } from 'lucide-react';
-import { getCities, getAirDNAData, saveAirDNAData, deleteAirDNAData, analyzeScreenshot, continueAIConversation, getSavedAIAnalyses, getAIAnalysisDetail, syncAirbticsData, syncAirbticsCity, getAirbticsSyncStatus, getAirbticsCityStatuses, City, AirDNAData, AirDNAAmenities, SavedAIAnalysis, AirbticsSyncStatus, AirbticsCityStatus } from '@/lib/api';
+import { getCities, createCity, getAirDNAData, saveAirDNAData, deleteAirDNAData, analyzeScreenshot, continueAIConversation, getSavedAIAnalyses, getAIAnalysisDetail, syncAirbticsData, syncAirbticsCity, getAirbticsSyncStatus, getAirbticsCityStatuses, City, AirDNAData, AirDNAAmenities, SavedAIAnalysis, AirbticsSyncStatus, AirbticsCityStatus } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import CityAutocomplete from './CityAutocomplete';
 
@@ -73,6 +73,12 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
   const [airbticsCityStatuses, setAirbticsCityStatuses] = useState<AirbticsCityStatus[]>([]);
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncingCity, setSyncingCity] = useState<number | null>(null);
+  
+  // Airbtics city selector for batch sync
+  const [showCitySelector, setShowCitySelector] = useState(false);
+  const [selectedSyncCities, setSelectedSyncCities] = useState<{city: string, state: string}[]>([]);
+  const [syncCityInput, setSyncCityInput] = useState('');
+  const [syncStateInput, setSyncStateInput] = useState('');
 
   // Fetch cities on mount and when refreshTrigger changes
   useEffect(() => {
@@ -187,6 +193,74 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
       console.error('Failed to sync city:', error);
     } finally {
       setSyncingCity(null);
+    }
+  };
+
+  const handleAddSyncCity = () => {
+    if (!syncCityInput.trim() || !syncStateInput.trim()) return;
+    
+    const newCity = { city: syncCityInput.trim(), state: syncStateInput.trim() };
+    // Check if already in list
+    if (!selectedSyncCities.some(c => c.city === newCity.city && c.state === newCity.state)) {
+      setSelectedSyncCities(prev => [...prev, newCity]);
+    }
+    setSyncCityInput('');
+    setSyncStateInput('');
+  };
+
+  const handleRemoveSyncCity = (index: number) => {
+    setSelectedSyncCities(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSyncSelectedCities = async () => {
+    if (selectedSyncCities.length === 0) return;
+    
+    setSyncingAll(true);
+    try {
+      // First, create cities that don't exist
+      for (const cityData of selectedSyncCities) {
+        const existingCity = cities.find(c => c.city === cityData.city && c.state === cityData.state);
+        if (!existingCity) {
+          try {
+            await createCity({ city: cityData.city, state: cityData.state });
+          } catch (err) {
+            console.log(`City ${cityData.city}, ${cityData.state} may already exist`);
+          }
+        }
+      }
+      
+      // Refresh cities list
+      const updatedCities = await getCities();
+      setCities(updatedCities);
+      
+      // Get city IDs for selected cities
+      const cityIds = selectedSyncCities
+        .map(sc => updatedCities.find(c => c.city === sc.city && c.state === sc.state)?.id)
+        .filter((id): id is number => id !== undefined);
+      
+      if (cityIds.length > 0) {
+        await syncAirbticsData(cityIds, true);
+        
+        // Poll for status updates
+        const checkStatus = async () => {
+          const status = await getAirbticsSyncStatus();
+          setAirbticsSyncStatus(status);
+          if (status.status === 'syncing') {
+            setTimeout(checkStatus, 3000);
+          } else {
+            setSyncingAll(false);
+            const cityStatuses = await getAirbticsCityStatuses();
+            setAirbticsCityStatuses(cityStatuses);
+            onDataSaved?.();
+          }
+        };
+        checkStatus();
+      } else {
+        setSyncingAll(false);
+      }
+    } catch (error) {
+      console.error('Failed to sync selected cities:', error);
+      setSyncingAll(false);
     }
   };
 
@@ -512,9 +586,92 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
           </button>
         </div>
         
-        <p className="text-xs text-blue-600 mb-3">
+        <p className="text-xs text-blue-600 mb-2">
           Revenue data is automatically fetched from Airbtics API for all bedroom counts (1-8) and refreshed every 6 months.
         </p>
+        
+        {/* City Selector Toggle */}
+        <button
+          onClick={() => setShowCitySelector(!showCitySelector)}
+          className="text-xs text-blue-700 hover:text-blue-900 underline mb-2"
+        >
+          {showCitySelector ? 'Hide' : 'Add specific cities to sync'}
+        </button>
+        
+        {/* City Selector Panel */}
+        {showCitySelector && (
+          <div className="bg-white rounded-lg p-3 mb-3 border border-blue-200">
+            <div className="flex gap-2 mb-2">
+              <div className="flex-1">
+                <CityAutocomplete
+                  value={syncCityInput}
+                  onChange={(city, state) => {
+                    setSyncCityInput(city);
+                    if (state) setSyncStateInput(state);
+                  }}
+                  placeholder="Type city name..."
+                />
+              </div>
+              <select
+                value={syncStateInput}
+                onChange={(e) => setSyncStateInput(e.target.value)}
+                className="input w-20 text-sm"
+              >
+                <option value="">State</option>
+                {['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'].map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleAddSyncCity}
+                disabled={!syncCityInput || !syncStateInput}
+                className="btn btn-sm bg-blue-500 hover:bg-blue-600 text-white px-2"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+            
+            {/* Selected Cities List */}
+            {selectedSyncCities.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-2">
+                {selectedSyncCities.map((city, idx) => (
+                  <span 
+                    key={idx} 
+                    className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded"
+                  >
+                    {city.city}, {city.state}
+                    <button 
+                      onClick={() => handleRemoveSyncCity(idx)}
+                      className="hover:text-red-600"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            
+            {selectedSyncCities.length > 0 && (
+              <button
+                onClick={handleSyncSelectedCities}
+                disabled={syncingAll || airbticsSyncStatus?.status === 'syncing'}
+                className="btn btn-sm bg-green-600 hover:bg-green-700 text-white text-xs w-full justify-center"
+              >
+                {syncingAll ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Syncing {selectedSyncCities.length} cities...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="h-3 w-3" />
+                    Sync {selectedSyncCities.length} Selected Cities
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Sync Status */}
         {airbticsSyncStatus && airbticsSyncStatus.status === 'syncing' && (
