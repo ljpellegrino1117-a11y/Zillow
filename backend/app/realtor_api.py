@@ -88,7 +88,8 @@ async def search_rentals(
                 
                 if response.status_code == 200:
                     data = response.json()
-                    results = data.get("data", {}).get("home_search", {}).get("results", [])
+                    # Realtor.com API returns "properties" not "results"
+                    results = data.get("data", {}).get("home_search", {}).get("properties", [])
                     total = data.get("data", {}).get("home_search", {}).get("total", 0)
                     
                     listings = []
@@ -154,7 +155,8 @@ def parse_listing(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "property_type": description.get("type", ""),
             "year_built": description.get("year_built"),
             "lot_sqft": description.get("lot_sqft"),
-            "url": data.get("href"),
+            # Build URL from permalink (Realtor.com API returns permalink, not href)
+            "url": f"https://www.realtor.com/realestateandhomes-detail/{data.get('permalink')}" if data.get("permalink") else None,
             "photos": [p.get("href") for p in data.get("photos", [])[:5]],  # First 5 photos
             "list_date": data.get("list_date"),
         }
@@ -321,7 +323,8 @@ async def search_rentals_by_zip(
                 
                 if response.status_code == 200:
                     data = response.json()
-                    results = data.get("data", {}).get("home_search", {}).get("results", [])
+                    # Realtor.com API returns "properties" not "results"
+                    results = data.get("data", {}).get("home_search", {}).get("properties", [])
                     total = data.get("data", {}).get("home_search", {}).get("total", 0)
                     
                     listings = []
