@@ -210,6 +210,52 @@ export default function CityManager({ onCityChange }: Props) {
     }
   };
 
+  // Major US cities for quick-add
+  const MAJOR_US_CITIES = [
+    { city: 'New York', state: 'NY' },
+    { city: 'Los Angeles', state: 'CA' },
+    { city: 'Chicago', state: 'IL' },
+    { city: 'Houston', state: 'TX' },
+    { city: 'Phoenix', state: 'AZ' },
+    { city: 'San Diego', state: 'CA' },
+    { city: 'Dallas', state: 'TX' },
+    { city: 'Austin', state: 'TX' },
+    { city: 'Denver', state: 'CO' },
+    { city: 'Nashville', state: 'TN' },
+    { city: 'Las Vegas', state: 'NV' },
+    { city: 'Orlando', state: 'FL' },
+    { city: 'Tampa', state: 'FL' },
+    { city: 'San Antonio', state: 'TX' },
+    { city: 'Charlotte', state: 'NC' },
+  ];
+
+  const [addingMajor, setAddingMajor] = useState(false);
+
+  const handleAddMajorCities = async () => {
+    if (!confirm(`Add ${MAJOR_US_CITIES.length} major US cities?`)) return;
+    
+    setAddingMajor(true);
+    try {
+      for (const cityData of MAJOR_US_CITIES) {
+        // Check if city already exists
+        const exists = cities.some(c => c.city === cityData.city && c.state === cityData.state);
+        if (!exists) {
+          try {
+            await createCity({ city: cityData.city, state: cityData.state });
+          } catch (err) {
+            console.log(`City ${cityData.city}, ${cityData.state} may already exist`);
+          }
+        }
+      }
+      await fetchCities();
+      onCityChange?.();
+    } catch (error) {
+      console.error('Failed to add major cities:', error);
+    } finally {
+      setAddingMajor(false);
+    }
+  };
+
   const handleStartScrape = async (c: City) => {
     const key = `${c.city}_${c.state}` + (c.zip_code ? `_${c.zip_code}` : '');
     try {
@@ -329,15 +375,30 @@ export default function CityManager({ onCityChange }: Props) {
           <MapPin className="h-5 w-5 text-primary-600" />
           Rental Cities Search
         </h2>
-        {cities.length > 0 && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={handleClearAllCities}
-            className="btn text-xs py-1 px-2 text-red-600 hover:bg-red-50"
+            onClick={handleAddMajorCities}
+            disabled={addingMajor}
+            className="btn text-xs py-1 px-2 text-blue-600 hover:bg-blue-50 border border-blue-200"
+            title="Quick-add 15 major US cities"
           >
-            <Trash2 className="h-3 w-3" />
-            Clear All
+            {addingMajor ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Plus className="h-3 w-3" />
+            )}
+            Quick Add Major Cities
           </button>
-        )}
+          {cities.length > 0 && (
+            <button
+              onClick={handleClearAllCities}
+              className="btn text-xs py-1 px-2 text-red-600 hover:bg-red-50"
+            >
+              <Trash2 className="h-3 w-3" />
+              Clear All
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Error message */}

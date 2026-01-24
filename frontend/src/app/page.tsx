@@ -6,6 +6,7 @@ import CityManager from '@/components/CityManager';
 import AirDNAInput from '@/components/AirDNAInput';
 import DiscrepancyTable from '@/components/DiscrepancyTable';
 import ListingsTable from '@/components/ListingsTable';
+import DashboardSummary from '@/components/DashboardSummary';
 import { getCities, deleteCity, getAirDNAData, deleteAirDNAData } from '@/lib/api';
 
 export default function Dashboard() {
@@ -77,6 +78,9 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Dashboard Summary */}
+        <DashboardSummary refreshTrigger={refreshTrigger} />
+
         {/* Top Section: Cities & AirDNA Input */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <CityManager onCityChange={handleDataChange} />
