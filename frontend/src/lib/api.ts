@@ -651,3 +651,57 @@ export const getInvestmentSuggestions = async (): Promise<InvestmentSuggestions>
   const response = await axios.post(`${API_BASE}/ai/investment-suggestions`);
   return response.data;
 };
+
+// ==================== Database Status ====================
+
+export interface DatabaseStatus {
+  database_type: 'PostgreSQL' | 'SQLite';
+  database_host: string;
+  is_production: boolean;
+  tables: {
+    cities: number;
+    airdna_entries: number;
+    listings: number;
+    airbtics_markets: number;
+  };
+  data_health: {
+    cities_configured: number;
+    cities_with_revenue_data: number;
+    total_revenue_entries: number;
+    data_coverage_percent: number;
+  };
+  status: 'healthy' | 'needs_data';
+}
+
+export interface DataExport {
+  export_timestamp: string;
+  cities: any[];
+  airdna_data: any[];
+  airbtics_markets: any[];
+  summary: {
+    cities_count: number;
+    airdna_count: number;
+    markets_count: number;
+  };
+}
+
+export const getDatabaseStatus = async (): Promise<DatabaseStatus> => {
+  const cacheKey = 'database_status';
+  const cached = getCached<DatabaseStatus>(cacheKey);
+  if (cached) return cached;
+  
+  const response = await axios.get(`${API_BASE}/database/status`);
+  setCache(cacheKey, response.data, DEFAULT_CACHE_TTL);
+  return response.data;
+};
+
+export const exportDatabase = async (): Promise<DataExport> => {
+  const response = await axios.get(`${API_BASE}/database/export`);
+  return response.data;
+};
+
+export const importDatabase = async (data: DataExport): Promise<any> => {
+  const response = await axios.post(`${API_BASE}/database/import`, data);
+  invalidateCache();
+  return response.data;
+};

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { MapPin, DollarSign, Home, TrendingUp, Database, RefreshCw, Loader2 } from 'lucide-react';
-import { getCities, getAirbticsCityStatuses, City, AirbticsCityStatus } from '@/lib/api';
+import { MapPin, DollarSign, TrendingUp, Database, RefreshCw, Loader2, CheckCircle, AlertCircle, Server } from 'lucide-react';
+import { getCities, getAirbticsCityStatuses, getDatabaseStatus, City, AirbticsCityStatus, DatabaseStatus } from '@/lib/api';
 
 interface Props {
   refreshTrigger?: number;
@@ -14,21 +14,25 @@ interface SummaryStats {
   totalAirDNAEntries: number;
   totalListings: number;
   avgRevenueByBedroom: Record<number, number>;
-  topMarkets: { city: string; state: string; avgRevenue: number }[];
+  topMarkets: { city: string; state: string; entries: number }[];
 }
 
 export default function DashboardSummary({ refreshTrigger }: Props) {
   const [stats, setStats] = useState<SummaryStats | null>(null);
+  const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const [cities, airbticsCities] = await Promise.all([
+        const [cities, airbticsCities, databaseStatus] = await Promise.all([
           getCities(),
-          getAirbticsCityStatuses()
+          getAirbticsCityStatuses(),
+          getDatabaseStatus()
         ]);
+
+        setDbStatus(databaseStatus);
 
         const citiesWithData = airbticsCities.filter(c => c.entries_count > 0);
         const totalEntries = airbticsCities.reduce((sum, c) => sum + c.entries_count, 0);
@@ -40,14 +44,14 @@ export default function DashboardSummary({ refreshTrigger }: Props) {
           .map(c => ({
             city: c.city,
             state: c.state,
-            avgRevenue: 0 // Would need another API call to get actual revenue
+            entries: c.entries_count
           }));
 
         setStats({
           totalCities: cities.length,
           citiesWithData: citiesWithData.length,
           totalAirDNAEntries: totalEntries,
-          totalListings: 0, // Would need listings count endpoint
+          totalListings: databaseStatus?.tables?.listings || 0,
           avgRevenueByBedroom: {},
           topMarkets
         });
@@ -92,15 +96,83 @@ export default function DashboardSummary({ refreshTrigger }: Props) {
           <TrendingUp className="h-5 w-5 text-primary-600" />
           Dashboard Overview
         </h2>
-        <button
-          onClick={() => setCollapsed(true)}
-          className="text-xs text-gray-500 hover:text-gray-700"
-        >
-          Hide
-        </button>
+        <div className="flex items-center gap-4">
+          {/* Database Status Badge */}
+          {dbStatus && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
+              dbStatus.is_production 
+                ? 'bg-green-100 text-green-700 border border-green-200' 
+                : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
+            }`}>
+              <Server className="h-4 w-4" />
+              <span>{dbStatus.database_type}</span>
+              {dbStatus.is_production ? (
+                <CheckCircle className="h-4 w-4" />
+              ) : (
+                <AlertCircle className="h-4 w-4" />
+              )}
+            </div>
+          )}
+          <button
+            onClick={() => setCollapsed(true)}
+            className="text-xs text-gray-500 hover:text-gray-700"
+          >
+            Hide
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Database Connection Info */}
+      {dbStatus && (
+        <div className={`mb-4 p-3 rounded-lg border ${
+          dbStatus.is_production 
+            ? 'bg-green-50 border-green-200' 
+            : 'bg-yellow-50 border-yellow-200'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {dbStatus.is_production ? (
+                <CheckCircle className="h-5 w-5 text-green-600" />
+              ) : (
+                <AlertCircle className="h-5 w-5 text-yellow-600" />
+              )}
+              <div>
+                <span className={`font-medium ${dbStatus.is_production ? 'text-green-800' : 'text-yellow-800'}`}>
+                  {dbStatus.is_production ? 'Production Database Connected' : 'Local Development Database'}
+                </span>
+                <span className="text-sm ml-2 text-gray-500">
+                  ({dbStatus.database_host})
+                </span>
+              </div>
+            </div>
+            <div className="text-sm">
+              {dbStatus.is_production ? (
+                <span className="text-green-700">Data is persisted and protected</span>
+              ) : (
+                <span className="text-yellow-700">Data will be lost on deployment</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        {/* Database Type Card */}
+        <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-2">
+            <div className={`p-2 rounded-lg ${dbStatus?.is_production ? 'bg-green-100' : 'bg-yellow-100'}`}>
+              <Server className={`h-4 w-4 ${dbStatus?.is_production ? 'text-green-600' : 'text-yellow-600'}`} />
+            </div>
+            <span className="text-sm text-gray-600">Database</span>
+          </div>
+          <div className={`text-lg font-bold ${dbStatus?.is_production ? 'text-green-600' : 'text-yellow-600'}`}>
+            {dbStatus?.database_type || 'Unknown'}
+          </div>
+          <div className="text-xs text-gray-500">
+            {dbStatus?.is_production ? 'Production' : 'Development'}
+          </div>
+        </div>
+
         {/* Cities Card */}
         <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-2">
@@ -122,7 +194,7 @@ export default function DashboardSummary({ refreshTrigger }: Props) {
             <span className="text-sm text-gray-600">Revenue Data</span>
           </div>
           <div className="text-2xl font-bold text-gray-900">{stats.totalAirDNAEntries}</div>
-          <div className="text-xs text-gray-500">AirDNA entries</div>
+          <div className="text-xs text-gray-500">Airbtics entries</div>
         </div>
 
         {/* Data Coverage Card */}
@@ -147,15 +219,19 @@ export default function DashboardSummary({ refreshTrigger }: Props) {
             </div>
             <span className="text-sm text-gray-600">Status</span>
           </div>
-          <div className="text-lg font-bold text-green-600">Ready</div>
-          <div className="text-xs text-gray-500">Airbtics synced</div>
+          <div className={`text-lg font-bold ${stats.totalAirDNAEntries > 0 ? 'text-green-600' : 'text-yellow-600'}`}>
+            {stats.totalAirDNAEntries > 0 ? 'Ready' : 'Needs Sync'}
+          </div>
+          <div className="text-xs text-gray-500">
+            {stats.totalAirDNAEntries > 0 ? 'Airbtics synced' : 'Run sync'}
+          </div>
         </div>
       </div>
 
       {/* Top Markets */}
       {stats.topMarkets.length > 0 && (
         <div className="mt-4 pt-4 border-t border-primary-100">
-          <div className="text-sm font-medium text-gray-700 mb-2">Top Markets (by data)</div>
+          <div className="text-sm font-medium text-gray-700 mb-2">Top Markets (by data points)</div>
           <div className="flex flex-wrap gap-2">
             {stats.topMarkets.map((market, i) => (
               <span
@@ -164,6 +240,9 @@ export default function DashboardSummary({ refreshTrigger }: Props) {
               >
                 <span className="font-medium">{market.city}</span>
                 <span className="text-gray-400">{market.state}</span>
+                <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full text-xs ml-1">
+                  {market.entries}
+                </span>
               </span>
             ))}
           </div>

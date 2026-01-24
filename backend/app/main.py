@@ -12,7 +12,7 @@ import time
 import base64
 import os
 
-from .database import engine, get_db, Base
+from .database import engine, get_db, Base, DATABASE_URL, is_sqlite
 from .models import City, ZillowListing, AirDNAData, AIScreenshotAnalysis, AirbticsMarket
 from .schemas import (
     CityCreate, CityResponse,
@@ -1761,6 +1761,205 @@ Keep the response concise but comprehensive (aim for 400-600 words)."""
     except Exception as e:
         logger.error(f"OpenAI API error in investment suggestions: {str(e)}")
         raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
+
+
+# ==================== Database Status & Data Migration ====================
+
+@app.get("/api/database/status")
+def get_database_status(db: Session = Depends(get_db)):
+    """Get database connection status and data summary"""
+    # Count records in each table
+    city_count = db.query(func.count(City.id)).scalar()
+    airdna_count = db.query(func.count(AirDNAData.id)).scalar()
+    listing_count = db.query(func.count(ZillowListing.id)).scalar()
+    market_count = db.query(func.count(AirbticsMarket.id)).scalar()
+    
+    # Get cities with Airbtics data
+    cities_with_data = db.query(City).join(
+        AirDNAData, 
+        (City.city == AirDNAData.city) & (City.state == AirDNAData.state),
+        isouter=False
+    ).distinct().count()
+    
+    # Mask connection string for security
+    if "postgresql" in DATABASE_URL.lower():
+        db_type = "PostgreSQL"
+        # Extract host from URL for display
+        import re
+        match = re.search(r'@([^:/]+)', DATABASE_URL)
+        db_host = match.group(1) if match else "configured"
+    else:
+        db_type = "SQLite"
+        db_host = "local file"
+    
+    return {
+        "database_type": db_type,
+        "database_host": db_host,
+        "is_production": not is_sqlite,
+        "tables": {
+            "cities": city_count,
+            "airdna_entries": airdna_count,
+            "listings": listing_count,
+            "airbtics_markets": market_count,
+        },
+        "data_health": {
+            "cities_configured": city_count,
+            "cities_with_revenue_data": cities_with_data,
+            "total_revenue_entries": airdna_count,
+            "data_coverage_percent": round((cities_with_data / city_count * 100) if city_count > 0 else 0, 1)
+        },
+        "status": "healthy" if airdna_count > 0 else "needs_data"
+    }
+
+
+@app.get("/api/database/export")
+def export_database(db: Session = Depends(get_db)):
+    """Export all data for migration to another database"""
+    import json
+    
+    # Export cities
+    cities = db.query(City).all()
+    cities_data = [{
+        "city": c.city,
+        "state": c.state,
+        "zip_code": c.zip_code,
+        "include_surrounding": c.include_surrounding,
+        "surrounding_miles": c.surrounding_miles,
+        "surrounding_only": c.surrounding_only,
+        "rent_min": c.rent_min,
+        "rent_max": c.rent_max,
+        "purchase_price_min": c.purchase_price_min,
+        "purchase_price_max": c.purchase_price_max,
+        "exclude_hoa": c.exclude_hoa,
+        "property_types": c.property_types,
+    } for c in cities]
+    
+    # Export AirDNA data
+    airdna = db.query(AirDNAData).all()
+    airdna_data = [{
+        "city": a.city,
+        "state": a.state,
+        "zip_code": a.zip_code,
+        "bedroom_min": a.bedroom_min,
+        "bedroom_max": a.bedroom_max,
+        "average_annual_revenue": a.average_annual_revenue,
+        "revenue_p25": a.revenue_p25,
+        "revenue_p50": a.revenue_p50,
+        "revenue_p75": a.revenue_p75,
+        "revenue_p90": a.revenue_p90,
+        "source": a.source,
+        "airbtics_market_id": a.airbtics_market_id,
+        "has_pool": a.has_pool,
+        "has_hot_tub": a.has_hot_tub,
+        "has_waterfront": a.has_waterfront,
+        "has_basement": a.has_basement,
+        "has_garage": a.has_garage,
+        "has_yard": a.has_yard,
+        "has_pet_friendly": a.has_pet_friendly,
+        "has_mother_in_law": a.has_mother_in_law,
+        "last_api_fetch": a.last_api_fetch.isoformat() if a.last_api_fetch else None,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    } for a in airdna]
+    
+    # Export Airbtics markets cache
+    markets = db.query(AirbticsMarket).all()
+    markets_data = [{
+        "city": m.city,
+        "state": m.state,
+        "zip_code": m.zip_code,
+        "market_id": m.market_id,
+        "market_name": m.market_name,
+        "country_code": m.country_code,
+    } for m in markets]
+    
+    return {
+        "export_timestamp": datetime.now().isoformat(),
+        "cities": cities_data,
+        "airdna_data": airdna_data,
+        "airbtics_markets": markets_data,
+        "summary": {
+            "cities_count": len(cities_data),
+            "airdna_count": len(airdna_data),
+            "markets_count": len(markets_data)
+        }
+    }
+
+
+@app.post("/api/database/import")
+def import_database(data: dict, db: Session = Depends(get_db)):
+    """Import data from export (for migration to new database)"""
+    from datetime import datetime
+    
+    imported = {"cities": 0, "airdna": 0, "markets": 0, "skipped": 0}
+    
+    # Import cities
+    for city_data in data.get("cities", []):
+        existing = db.query(City).filter(
+            City.city == city_data["city"],
+            City.state == city_data["state"]
+        ).first()
+        
+        if not existing:
+            city = City(**city_data)
+            db.add(city)
+            imported["cities"] += 1
+        else:
+            imported["skipped"] += 1
+    
+    db.commit()
+    
+    # Import AirDNA data
+    for airdna_item in data.get("airdna_data", []):
+        # Check for existing entry
+        existing = db.query(AirDNAData).filter(
+            AirDNAData.city == airdna_item["city"],
+            AirDNAData.state == airdna_item["state"],
+            AirDNAData.bedroom_min == airdna_item.get("bedroom_min"),
+            AirDNAData.bedroom_max == airdna_item.get("bedroom_max"),
+            AirDNAData.source == airdna_item.get("source", "manual")
+        ).first()
+        
+        if not existing:
+            # Parse datetime fields
+            if airdna_item.get("last_api_fetch"):
+                airdna_item["last_api_fetch"] = datetime.fromisoformat(airdna_item["last_api_fetch"])
+            if airdna_item.get("created_at"):
+                airdna_item["created_at"] = datetime.fromisoformat(airdna_item["created_at"])
+            
+            airdna = AirDNAData(**airdna_item)
+            db.add(airdna)
+            imported["airdna"] += 1
+        else:
+            imported["skipped"] += 1
+    
+    db.commit()
+    
+    # Import Airbtics markets
+    for market_data in data.get("airbtics_markets", []):
+        existing = db.query(AirbticsMarket).filter(
+            AirbticsMarket.city == market_data["city"],
+            AirbticsMarket.state == market_data["state"]
+        ).first()
+        
+        if not existing:
+            market = AirbticsMarket(**market_data)
+            db.add(market)
+            imported["markets"] += 1
+        else:
+            imported["skipped"] += 1
+    
+    db.commit()
+    
+    # Invalidate caches
+    cache.invalidate()
+    listings_cache.invalidate()
+    analysis_cache.invalidate()
+    
+    return {
+        "message": "Import completed",
+        "imported": imported,
+        "timestamp": datetime.now().isoformat()
+    }
 
 
 @app.on_event("startup")
