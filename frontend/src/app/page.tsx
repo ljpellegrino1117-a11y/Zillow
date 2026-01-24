@@ -7,6 +7,7 @@ import AirDNAInput from '@/components/AirDNAInput';
 import DiscrepancyTable from '@/components/DiscrepancyTable';
 import ListingsTable from '@/components/ListingsTable';
 import DashboardSummary from '@/components/DashboardSummary';
+import AIInvestmentSuggestions from '@/components/AIInvestmentSuggestions';
 import { getCities, deleteCity, getAirDNAData, deleteAirDNAData } from '@/lib/api';
 
 export default function Dashboard() {
@@ -111,6 +112,11 @@ export default function Dashboard() {
         ) : (
           <ListingsTable refreshTrigger={refreshTrigger} />
         )}
+
+        {/* AI Investment Advisor */}
+        <div className="mt-8">
+          <AIInvestmentSuggestions refreshTrigger={refreshTrigger} />
+        </div>
       </main>
 
       {/* Footer */}

@@ -624,3 +624,30 @@ export const getAirbticsCityStatuses = async (): Promise<AirbticsCityStatus[]> =
   setCache(cacheKey, response.data, AIRBTICS_STATUS_TTL);
   return response.data;
 };
+
+// ==================== AI Investment Suggestions ====================
+
+export interface MarketOpportunity {
+  city: string;
+  state: string;
+  avg_annual_revenue: number;
+  data_points: number;
+  bedroom_counts: number[];
+  data_sources: string[];
+  has_pool_data: boolean;
+  has_waterfront_data: boolean;
+}
+
+export interface InvestmentSuggestions {
+  suggestions: string;
+  top_opportunities: MarketOpportunity[];
+  event_opportunities: MarketOpportunity[];
+  generated_at: string;
+  markets_analyzed: number;
+  total_data_points: number;
+}
+
+export const getInvestmentSuggestions = async (): Promise<InvestmentSuggestions> => {
+  const response = await axios.post(`${API_BASE}/ai/investment-suggestions`);
+  return response.data;
+};

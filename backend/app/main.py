@@ -1606,6 +1606,163 @@ def cleanup_old_airdna_data():
         db.close()
 
 
+# ==================== AI Investment Suggestions ====================
+
+@app.post("/api/ai/investment-suggestions")
+async def get_investment_suggestions(db: Session = Depends(get_db)):
+    """
+    Generate AI-powered investment suggestions based on all available data.
+    Considers ROI, upcoming events (FIFA 2026), market conditions, and arbitrage potential.
+    """
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        raise HTTPException(
+            status_code=400,
+            detail="OPENAI_API_KEY not configured. Add it to environment variables."
+        )
+    
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=openai_key)
+    except ImportError:
+        raise HTTPException(status_code=500, detail="OpenAI package not installed")
+    
+    # Gather all data
+    cities = db.query(City).all()
+    if not cities:
+        return {
+            "suggestions": "No cities configured yet. Add some cities to analyze investment opportunities.",
+            "top_opportunities": [],
+            "event_opportunities": [],
+            "warnings": ["No data available for analysis"]
+        }
+    
+    # Get all AirDNA data
+    airdna_data = db.query(AirDNAData).all()
+    
+    # Build market summaries
+    market_summaries = []
+    for city in cities:
+        city_airdna = [a for a in airdna_data if a.city.lower() == city.city.lower() and a.state.lower() == city.state.lower()]
+        
+        if city_airdna:
+            revenues = [a.average_annual_revenue for a in city_airdna if a.average_annual_revenue]
+            bedrooms = set(a.bedroom_min for a in city_airdna if a.bedroom_min)
+            sources = set(a.source for a in city_airdna if a.source)
+            
+            avg_revenue = sum(revenues) / len(revenues) if revenues else 0
+            
+            market_summaries.append({
+                "city": city.city,
+                "state": city.state,
+                "avg_annual_revenue": round(avg_revenue),
+                "data_points": len(city_airdna),
+                "bedroom_counts": sorted(list(bedrooms)),
+                "data_sources": list(sources),
+                "has_pool_data": any(a.has_pool is not None for a in city_airdna),
+                "has_waterfront_data": any(a.has_waterfront is not None for a in city_airdna),
+            })
+    
+    # Known upcoming events that affect STR demand
+    upcoming_events = """
+    MAJOR UPCOMING EVENTS (2026):
+    - FIFA World Cup 2026 (June-July 2026): Host cities include:
+      * New York/New Jersey, Los Angeles, Dallas, Houston, Atlanta, Miami, 
+      * Philadelphia, Seattle, San Francisco, Kansas City, Boston
+      * These cities will see MASSIVE demand spikes during the tournament
+      * Investment window is NOW - properties need to be acquired and stabilized before June 2026
+    
+    - Other factors to consider:
+      * Major convention cities (Las Vegas, Orlando, San Diego) have year-round demand
+      * College towns see seasonal spikes during graduation, football season
+      * Beach/resort destinations have summer peaks
+      * Ski resort areas have winter peaks
+    """
+    
+    # Build the prompt
+    prompt = f"""You are an expert real estate investment analyst specializing in short-term rental (STR) arbitrage.
+
+TODAY'S DATE: January 24, 2026
+
+{upcoming_events}
+
+MARKET DATA FROM USER'S DATABASE:
+{json.dumps(market_summaries, indent=2)}
+
+Based on this data, provide investment suggestions with a STRONG focus on ROI and timing. Consider:
+
+1. **FIFA 2026 URGENCY**: The World Cup starts in ~5 months. For host cities in the data, emphasize:
+   - Time is running out to acquire and stabilize properties
+   - Expected revenue multipliers during the tournament (2-4x normal)
+   - Quick ROI potential if acquired NOW
+
+2. **ROI Analysis**: For each promising market:
+   - Estimated annual revenue potential
+   - Typical rental costs for arbitrage
+   - Expected profit margins
+   - Time to break even
+
+3. **Risk Assessment**:
+   - Which markets have the best data confidence?
+   - Where are the highest and lowest risk opportunities?
+
+4. **Actionable Recommendations**:
+   - Top 3 markets to prioritize RIGHT NOW
+   - Specific bedroom counts that show best margins
+   - Any markets to avoid
+
+Format your response as a clear, actionable investment briefing. Be specific with numbers.
+Include a "TIME SENSITIVITY" section for FIFA-related opportunities.
+Keep the response concise but comprehensive (aim for 400-600 words)."""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert real estate investment analyst. Provide clear, data-driven advice focused on ROI and actionable insights. Be direct and specific with recommendations."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=1500,
+            temperature=0.7,
+        )
+        
+        suggestions = response.choices[0].message.content
+        
+        # Extract top opportunities from market data
+        top_opportunities = sorted(
+            [m for m in market_summaries if m["avg_annual_revenue"] > 0],
+            key=lambda x: x["avg_annual_revenue"],
+            reverse=True
+        )[:5]
+        
+        # FIFA host cities in our data
+        fifa_cities = ["New York", "Los Angeles", "Dallas", "Houston", "Atlanta", "Miami", 
+                       "Philadelphia", "Seattle", "San Francisco", "Kansas City", "Boston"]
+        event_opportunities = [
+            m for m in market_summaries 
+            if any(fc.lower() in m["city"].lower() for fc in fifa_cities)
+        ]
+        
+        return {
+            "suggestions": suggestions,
+            "top_opportunities": top_opportunities,
+            "event_opportunities": event_opportunities,
+            "generated_at": datetime.now().isoformat(),
+            "markets_analyzed": len(market_summaries),
+            "total_data_points": len(airdna_data)
+        }
+        
+    except Exception as e:
+        logger.error(f"OpenAI API error in investment suggestions: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
+
+
 @app.on_event("startup")
 async def startup_tasks():
     """Run cleanup and Airbtics sync on startup"""
