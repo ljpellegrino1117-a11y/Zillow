@@ -8,6 +8,7 @@ import DiscrepancyTable from '@/components/DiscrepancyTable';
 import ListingsTable from '@/components/ListingsTable';
 import DashboardSummary from '@/components/DashboardSummary';
 import AIInvestmentSuggestions from '@/components/AIInvestmentSuggestions';
+import OpportunityFinder from '@/components/OpportunityFinder';
 import { getCities, deleteCity, getAirDNAData, deleteAirDNAData } from '@/lib/api';
 
 export default function Dashboard() {
@@ -82,7 +83,12 @@ export default function Dashboard() {
         {/* Dashboard Summary */}
         <DashboardSummary refreshTrigger={refreshTrigger} />
 
-        {/* Top Section: Cities & AirDNA Input */}
+        {/* Opportunity Finder - Main Feature */}
+        <div className="mb-8">
+          <OpportunityFinder refreshTrigger={refreshTrigger} />
+        </div>
+
+        {/* Data Management Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <CityManager onCityChange={handleDataChange} />
           <AirDNAInput onDataSaved={handleDataChange} refreshTrigger={refreshTrigger} />

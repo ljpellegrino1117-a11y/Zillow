@@ -705,3 +705,83 @@ export const importDatabase = async (data: DataExport): Promise<any> => {
   invalidateCache();
   return response.data;
 };
+
+// ==================== Opportunity Finder ====================
+
+export interface OpportunityListing {
+  listing_id: number;
+  address: string;
+  city: string;
+  state: string;
+  zip_code?: string;
+  bedrooms: number;
+  bathrooms?: number;
+  sqft?: number;
+  monthly_rent: number;
+  url?: string;
+  photos?: string[];
+  agent_name?: string;
+  agent_phone?: string;
+  agent_email?: string;
+  agent_company?: string;
+  listing_source: string;
+  has_pool: boolean;
+  has_waterfront: boolean;
+  has_garage: boolean;
+  has_yard: boolean;
+  estimated_annual_revenue: number;
+  revenue_source: string;
+  revenue_confidence: string;
+  annual_rent: number;
+  estimated_expenses: number;
+  estimated_profit: number;
+  roi_score: number;
+  break_even_occupancy: number;
+  strengths: string[];
+  weaknesses: string[];
+}
+
+export interface OpportunitySearchRequest {
+  cities: string[];
+  min_bedrooms?: number;
+  max_bedrooms?: number;
+  min_profit?: number;
+  amenities?: string[];
+  max_results?: number;
+}
+
+export interface OpportunitySearchResponse {
+  opportunities: OpportunityListing[];
+  total_found: number;
+  markets_searched: number;
+  ai_analysis?: string;
+  search_criteria: {
+    cities: string[];
+    min_bedrooms: number;
+    max_bedrooms: number;
+    min_profit: number;
+  };
+  generated_at: string;
+  listings_analyzed: number;
+  revenue_data_sources: Record<string, number>;
+  warnings: string[];
+}
+
+export interface RealtorApiStatus {
+  status: string;
+  message: string;
+  configured: boolean;
+  sample_count?: number;
+}
+
+export const findOpportunities = async (
+  request: OpportunitySearchRequest
+): Promise<OpportunitySearchResponse> => {
+  const response = await axios.post(`${API_BASE}/opportunities/find`, request);
+  return response.data;
+};
+
+export const getRealtorApiStatus = async (): Promise<RealtorApiStatus> => {
+  const response = await axios.get(`${API_BASE}/opportunities/api-status`);
+  return response.data;
+};

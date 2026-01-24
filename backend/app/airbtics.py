@@ -169,8 +169,9 @@ async def fetch_revenue_metrics(
                     logger.warning(f"No revenue data for market {market_id}, {bedrooms} BR")
                     return None
                 
-                # Calculate average of recent 12 months for each percentile
-                recent_months = monthly_data[:12] if len(monthly_data) >= 12 else monthly_data
+                # Calculate average of most recent 12 months for each percentile
+                # Use [-12:] to get the LAST 12 months (most recent), not first 12
+                recent_months = monthly_data[-12:] if len(monthly_data) >= 12 else monthly_data
                 
                 if not recent_months:
                     return None

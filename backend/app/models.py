@@ -101,6 +101,18 @@ class ZillowListing(Base):
     has_creative_financing = Column(Boolean, default=False, index=True)
     financing_keywords = Column(Text)  # JSON list of matched keywords
     
+    # Agent/Contact information
+    agent_name = Column(String(200), nullable=True)
+    agent_phone = Column(String(50), nullable=True)
+    agent_email = Column(String(200), nullable=True)
+    agent_company = Column(String(200), nullable=True)
+    
+    # Data source tracking
+    listing_source = Column(String(50), default='zillow', index=True)  # 'zillow', 'realtor', 'manual'
+    
+    # Photo URLs (JSON array)
+    photos = Column(Text, nullable=True)  # JSON array of photo URLs
+    
     scraped_at = Column(DateTime, default=datetime.utcnow)
 
     city_rel = relationship("City", back_populates="listings")

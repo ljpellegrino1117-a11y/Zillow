@@ -21,10 +21,14 @@ from .schemas import (
     DiscrepancyResult,
     ScrapeRequest, ScrapeStatus,
     AIScreenshotAnalysisResponse,
-    AirbticsSyncRequest, AirbticsSyncStatus, AirbticsCityStatus
+    AirbticsSyncRequest, AirbticsSyncStatus, AirbticsCityStatus,
+    OpportunitySearchRequest, OpportunitySearchResponse, OpportunityListing
 )
 from .scraper import scrape_zillow
 from . import airbtics
+from . import realtor_api
+import math
+import json
 from datetime import timedelta
 
 # Create tables
@@ -828,33 +832,49 @@ def analyze_opportunity(
     """
     Generate AI-like analysis of an arbitrage opportunity.
     Returns enhanced metrics and commentary.
-    """
-    # Operating cost estimates (industry standards)
-    # Cleaning: $100-200 per turnover, assume 3 turnovers/month
-    cleaning_per_month = 150 * 3 * 12  # $5,400/year
-    # Supplies and consumables: ~3% of revenue
-    supplies_rate = 0.03
-    # Platform fees (Airbnb/VRBO): ~15% of revenue
-    platform_fee_rate = 0.15
-    # Utilities estimate: $200-400/month depending on size
-    utilities_per_year = (150 + bedrooms * 50) * 12
-    # Insurance: ~$1,500-3,000/year for STR
-    insurance_per_year = 1500 + (bedrooms * 250)
-    # Maintenance/repairs: ~5% of revenue
-    maintenance_rate = 0.05
-    # Management (if not self-managed): 20-25% of revenue (optional, assume self-managed)
-    management_rate = 0.0
     
+    UPDATED: Uses realistic STR expense calculations:
+    - Variable cleaning based on occupancy and turnovers
+    - Higher utilities for STR use ($300-600 base)
+    - 10% maintenance rate (STR has higher wear)
+    """
     # Default occupancy rate by bedroom (more bedrooms = lower occupancy typically)
-    base_occupancy = {3: 0.68, 4: 0.65, 5: 0.62, 6: 0.58, 7: 0.55, 8: 0.52}
-    occupancy_rate = base_occupancy.get(bedrooms, 0.60)
+    base_occupancy = {1: 0.70, 2: 0.68, 3: 0.65, 4: 0.62, 5: 0.58, 6: 0.55, 7: 0.52, 8: 0.50}
+    occupancy_rate = base_occupancy.get(bedrooms, 0.55)
     
     # Calculate adjusted revenue
     adjusted_annual_revenue = airdna_annual * occupancy_rate
     
+    # IMPROVED EXPENSE CALCULATIONS
+    
+    # Variable cleaning: based on turnovers (avg 3.5-night stays)
+    avg_stay_length = 3.5
+    nights_booked = 365 * occupancy_rate
+    turnovers_per_year = nights_booked / avg_stay_length
+    cleaning_cost = turnovers_per_year * 150  # $150 per turnover
+    
+    # Supplies and consumables: ~3% of revenue
+    supplies_rate = 0.03
+    
+    # Platform fees (Airbnb/VRBO): ~15% of revenue
+    platform_fee_rate = 0.15
+    
+    # Utilities: HIGHER for STR ($300-600 base + per bedroom)
+    # STRs have higher utility usage due to guest turnover, HVAC, etc.
+    utilities_per_year = (300 + bedrooms * 75) * 12
+    
+    # Insurance: STR insurance
+    insurance_per_year = 2000 + (bedrooms * 300)
+    
+    # Maintenance/repairs: 10% for STR (higher than LTR due to wear)
+    maintenance_rate = 0.10
+    
+    # Management (assume self-managed for now)
+    management_rate = 0.0
+    
     # Calculate expenses
     variable_expenses = adjusted_annual_revenue * (supplies_rate + platform_fee_rate + maintenance_rate + management_rate)
-    fixed_expenses = cleaning_per_month + utilities_per_year + insurance_per_year
+    fixed_expenses = cleaning_cost + utilities_per_year + insurance_per_year
     total_annual_expenses = variable_expenses + fixed_expenses
     
     # Calculate annual rent cost (using bottom 10% as target)
@@ -865,13 +885,26 @@ def analyze_opportunity(
     net_monthly_cashflow = net_annual_profit / 12
     
     # Break-even occupancy calculation
-    # Revenue needed = rent + expenses
-    # At break-even: airdna_annual * occ_rate * (1 - var_rate) = rent + fixed_expenses
+    # Note: Cleaning is variable but estimated based on expected occupancy
+    # For break-even, we use the utilities + insurance as truly fixed
+    truly_fixed = utilities_per_year + insurance_per_year
     var_rate = supplies_rate + platform_fee_rate + maintenance_rate
-    if airdna_annual * (1 - var_rate) > 0:
-        break_even_occ = (annual_rent + fixed_expenses) / (airdna_annual * (1 - var_rate))
+    
+    # Cleaning cost per night = $150 / avg_stay_length
+    cleaning_per_night = 150 / avg_stay_length
+    
+    # Break-even: revenue * (1 - var_rate) - cleaning_per_night * nights = rent + truly_fixed
+    # airdna_annual * occ * (1 - var_rate) - cleaning_per_night * 365 * occ = rent + truly_fixed
+    # occ * (airdna_annual * (1 - var_rate) - cleaning_per_night * 365) = rent + truly_fixed
+    net_per_unit_occ = airdna_annual * (1 - var_rate) - (cleaning_per_night * 365)
+    
+    if net_per_unit_occ > 0:
+        break_even_occ = (annual_rent + truly_fixed) / net_per_unit_occ
     else:
         break_even_occ = 1.0
+    
+    # Clamp to reasonable range
+    break_even_occ = min(break_even_occ, 1.0)
     
     # Expense ratio
     expense_ratio = total_annual_expenses / adjusted_annual_revenue if adjusted_annual_revenue > 0 else 0
@@ -1106,8 +1139,9 @@ def get_discrepancy_analysis(
             prices = [l.price for l in listings]
             avg_price = sum(prices) / len(prices)
             
-            # Bottom 10% average
-            bottom_count = max(1, len(prices) // 10)
+            # Bottom 10% average - use math.ceil for true 10%
+            # (integer division // would undercount, e.g., 15 listings → 1 instead of 2)
+            bottom_count = max(1, math.ceil(len(prices) * 0.1))
             bottom_prices = sorted(prices)[:bottom_count]
             bottom_avg = sum(bottom_prices) / len(bottom_prices)
             
@@ -1604,6 +1638,410 @@ def cleanup_old_airdna_data():
         db.rollback()
     finally:
         db.close()
+
+
+# ==================== Opportunity Finder ====================
+
+def calculate_opportunity_metrics(
+    listing: Dict[str, Any],
+    revenue_data: Dict[str, Any],
+    bedrooms: int
+) -> Dict[str, Any]:
+    """
+    Calculate profitability metrics for a listing opportunity.
+    
+    Uses improved expense calculations:
+    - Variable cleaning based on occupancy
+    - Realistic utilities for STR
+    - 10% maintenance rate
+    """
+    monthly_rent = listing.get("price", 0)
+    annual_rent = monthly_rent * 12
+    
+    # Get revenue estimate (use p50 as default, fall back to average)
+    annual_revenue = revenue_data.get("revenue_p50") or revenue_data.get("average_annual_revenue", 0)
+    
+    # Occupancy rates by bedroom (conservative estimates)
+    occupancy_rates = {1: 0.70, 2: 0.68, 3: 0.65, 4: 0.62, 5: 0.58, 6: 0.55, 7: 0.52, 8: 0.50}
+    occupancy_rate = occupancy_rates.get(bedrooms, 0.55)
+    
+    # Adjusted revenue
+    adjusted_revenue = annual_revenue * occupancy_rate
+    
+    # IMPROVED EXPENSE CALCULATIONS
+    
+    # Variable cleaning: based on turnovers (avg 3-night stays)
+    avg_stay_length = 3.5
+    turnovers_per_year = (365 * occupancy_rate) / avg_stay_length
+    cleaning_cost = turnovers_per_year * 150  # $150 per turnover
+    
+    # Utilities: Higher for STR ($300-600 base + per bedroom)
+    utilities_per_year = (300 + bedrooms * 75) * 12
+    
+    # Platform fees: 15% of revenue
+    platform_fees = adjusted_revenue * 0.15
+    
+    # Supplies: 3% of revenue
+    supplies = adjusted_revenue * 0.03
+    
+    # Maintenance: 10% for STR (higher than LTR due to wear)
+    maintenance = adjusted_revenue * 0.10
+    
+    # Insurance: STR insurance
+    insurance = 2000 + (bedrooms * 300)
+    
+    # Total expenses
+    total_expenses = cleaning_cost + utilities_per_year + platform_fees + supplies + maintenance + insurance
+    
+    # Net profit
+    net_profit = adjusted_revenue - annual_rent - total_expenses
+    monthly_cashflow = net_profit / 12
+    
+    # Break-even occupancy
+    fixed_costs = annual_rent + utilities_per_year + insurance
+    variable_rate = 0.15 + 0.03 + 0.10  # platform + supplies + maintenance
+    if annual_revenue * (1 - variable_rate) > 0:
+        break_even_occ = (fixed_costs + (turnovers_per_year * 150)) / (annual_revenue * (1 - variable_rate))
+    else:
+        break_even_occ = 1.0
+    break_even_occ = min(break_even_occ, 1.0)
+    
+    # ROI Score (1-100)
+    score = 50
+    profit_margin = net_profit / annual_rent if annual_rent > 0 else 0
+    
+    if profit_margin > 0.5:
+        score += 25
+    elif profit_margin > 0.3:
+        score += 15
+    elif profit_margin > 0.15:
+        score += 10
+    elif profit_margin > 0:
+        score += 5
+    elif profit_margin > -0.1:
+        score -= 5
+    else:
+        score -= 15
+    
+    if monthly_cashflow > 2000:
+        score += 15
+    elif monthly_cashflow > 1000:
+        score += 10
+    elif monthly_cashflow > 500:
+        score += 5
+    elif monthly_cashflow < 0:
+        score -= 10
+    
+    if break_even_occ < 0.40:
+        score += 10
+    elif break_even_occ < 0.50:
+        score += 5
+    elif break_even_occ > 0.75:
+        score -= 10
+    
+    score = max(1, min(100, score))
+    
+    # Strengths and weaknesses
+    strengths = []
+    weaknesses = []
+    
+    if monthly_cashflow > 2000:
+        strengths.append(f"Strong cashflow: ${monthly_cashflow:,.0f}/mo")
+    elif monthly_cashflow > 1000:
+        strengths.append(f"Good cashflow: ${monthly_cashflow:,.0f}/mo")
+    
+    if break_even_occ < 0.45:
+        strengths.append(f"Low break-even: {break_even_occ:.0%} occupancy")
+    
+    revenue_to_rent = annual_revenue / annual_rent if annual_rent > 0 else 0
+    if revenue_to_rent > 2.5:
+        strengths.append(f"High revenue potential: {revenue_to_rent:.1f}x rent")
+    elif revenue_to_rent > 2.0:
+        strengths.append(f"Good revenue ratio: {revenue_to_rent:.1f}x rent")
+    
+    if monthly_cashflow < 0:
+        weaknesses.append(f"Negative cashflow: -${abs(monthly_cashflow):,.0f}/mo")
+    elif monthly_cashflow < 500:
+        weaknesses.append(f"Thin margins: ${monthly_cashflow:,.0f}/mo")
+    
+    if break_even_occ > 0.70:
+        weaknesses.append(f"High break-even: {break_even_occ:.0%} needed")
+    
+    if bedrooms >= 6:
+        weaknesses.append(f"Large property ({bedrooms}BR): Higher costs")
+    
+    return {
+        "annual_rent": annual_rent,
+        "estimated_annual_revenue": annual_revenue,
+        "adjusted_revenue": adjusted_revenue,
+        "occupancy_rate": occupancy_rate,
+        "estimated_expenses": round(total_expenses, 2),
+        "estimated_profit": round(net_profit, 2),
+        "monthly_cashflow": round(monthly_cashflow, 2),
+        "break_even_occupancy": round(break_even_occ, 3),
+        "roi_score": score,
+        "strengths": strengths[:3],
+        "weaknesses": weaknesses[:3],
+    }
+
+
+@app.post("/api/opportunities/find", response_model=OpportunitySearchResponse)
+async def find_opportunities(
+    request: OpportunitySearchRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Find arbitrage opportunities by comparing rental listings with STR revenue data.
+    
+    This is the main value-add feature:
+    1. Fetches rental listings from Realtor.com API (or existing DB)
+    2. Matches with Airbtics revenue data
+    3. Calculates profit potential
+    4. Ranks by ROI score
+    5. Provides AI analysis
+    """
+    opportunities = []
+    warnings = []
+    listings_analyzed = 0
+    revenue_sources = {"airbtics": 0, "manual": 0, "estimated": 0}
+    
+    # Parse cities
+    cities_to_search = []
+    for city_str in request.cities:
+        parts = city_str.split(",")
+        if len(parts) >= 2:
+            city_name = parts[0].strip()
+            state_code = parts[1].strip()
+            cities_to_search.append((city_name, state_code))
+    
+    if not cities_to_search:
+        raise HTTPException(status_code=400, detail="No valid cities provided")
+    
+    # Check if Realtor API is configured
+    use_realtor_api = realtor_api.is_configured()
+    
+    for city_name, state_code in cities_to_search:
+        # Get or create city record
+        city_record = db.query(City).filter(
+            func.lower(City.city) == city_name.lower(),
+            func.lower(City.state) == state_code.lower()
+        ).first()
+        
+        # Get revenue data for this city
+        revenue_data_list = []
+        if city_record:
+            revenue_data_list = db.query(AirDNAData).filter(
+                AirDNAData.city_id == city_record.id
+            ).all()
+        
+        # Also check by city/state name directly
+        if not revenue_data_list:
+            # Look up revenue data by city name (might be stored without city_id)
+            from sqlalchemy import and_
+            revenue_data_list = db.query(AirDNAData).join(City).filter(
+                func.lower(City.city) == city_name.lower(),
+                func.lower(City.state) == state_code.lower()
+            ).all()
+        
+        if not revenue_data_list:
+            warnings.append(f"No revenue data for {city_name}, {state_code}")
+            continue
+        
+        # Build revenue lookup by bedroom count
+        revenue_by_bedroom = {}
+        for rd in revenue_data_list:
+            for br in range(rd.bedroom_min, rd.bedroom_max + 1):
+                if br not in revenue_by_bedroom:
+                    revenue_by_bedroom[br] = rd
+                    revenue_sources[rd.source or "manual"] = revenue_sources.get(rd.source or "manual", 0) + 1
+        
+        # Get listings - either from Realtor API or existing database
+        listings = []
+        
+        if use_realtor_api:
+            # Fetch fresh listings from Realtor.com
+            try:
+                api_listings = await realtor_api.search_all_rentals(
+                    city=city_name,
+                    state_code=state_code,
+                    min_beds=request.min_bedrooms,
+                    max_beds=request.max_bedrooms,
+                    max_listings=100
+                )
+                listings = api_listings
+            except Exception as e:
+                logger.error(f"Realtor API error for {city_name}: {str(e)}")
+                warnings.append(f"API error for {city_name}: {str(e)}")
+        
+        # Fall back to database listings if API didn't return results
+        if not listings and city_record:
+            db_listings = db.query(ZillowListing).filter(
+                ZillowListing.city_id == city_record.id,
+                ZillowListing.bedrooms >= request.min_bedrooms,
+                ZillowListing.bedrooms <= request.max_bedrooms,
+                ZillowListing.listing_type == 'rental'
+            ).all()
+            
+            listings = [{
+                "listing_id": l.id,
+                "address": l.address,
+                "city": l.city or city_name,
+                "state": l.state or state_code,
+                "zip_code": l.zip_code,
+                "bedrooms": l.bedrooms,
+                "bathrooms": l.bathrooms,
+                "price": l.price,
+                "sqft": l.sqft,
+                "url": l.url,
+                "photos": json.loads(l.photos) if l.photos else [],
+                "agent_name": l.agent_name,
+                "agent_phone": l.agent_phone,
+                "agent_email": l.agent_email,
+                "agent_company": l.agent_company,
+                "listing_source": l.listing_source or "zillow",
+                "has_pool": l.has_pool,
+                "has_waterfront": l.has_waterfront,
+                "has_garage": l.has_garage,
+                "has_yard": l.has_yard,
+            } for l in db_listings]
+        
+        # Analyze each listing
+        for listing in listings:
+            listings_analyzed += 1
+            bedrooms = listing.get("bedrooms", 0)
+            
+            # Skip if no revenue data for this bedroom count
+            if bedrooms not in revenue_by_bedroom:
+                continue
+            
+            revenue_data = revenue_by_bedroom[bedrooms]
+            
+            # Calculate metrics
+            metrics = calculate_opportunity_metrics(
+                listing,
+                {
+                    "average_annual_revenue": revenue_data.average_annual_revenue,
+                    "revenue_p50": revenue_data.revenue_p50,
+                    "revenue_p25": revenue_data.revenue_p25,
+                    "revenue_p75": revenue_data.revenue_p75,
+                },
+                bedrooms
+            )
+            
+            # Filter by minimum profit
+            if metrics["estimated_profit"] < request.min_profit:
+                continue
+            
+            # Parse photos
+            photos = listing.get("photos", [])
+            if isinstance(photos, str):
+                try:
+                    photos = json.loads(photos)
+                except:
+                    photos = []
+            
+            # Create opportunity object
+            opp = OpportunityListing(
+                listing_id=listing.get("listing_id") or listing.get("property_id") or 0,
+                address=listing.get("address", ""),
+                city=listing.get("city", city_name),
+                state=listing.get("state", state_code),
+                zip_code=listing.get("zip_code"),
+                bedrooms=bedrooms,
+                bathrooms=listing.get("bathrooms"),
+                sqft=listing.get("sqft"),
+                monthly_rent=listing.get("price", 0),
+                url=listing.get("url"),
+                photos=photos[:5] if photos else None,
+                agent_name=listing.get("agent_name"),
+                agent_phone=listing.get("agent_phone"),
+                agent_email=listing.get("agent_email"),
+                agent_company=listing.get("agent_company"),
+                listing_source=listing.get("listing_source", "realtor"),
+                has_pool=listing.get("has_pool", False),
+                has_waterfront=listing.get("has_waterfront", False),
+                has_garage=listing.get("has_garage", False),
+                has_yard=listing.get("has_yard", False),
+                estimated_annual_revenue=metrics["estimated_annual_revenue"],
+                revenue_source=revenue_data.source or "airbtics",
+                revenue_confidence="high" if revenue_data.source == "airbtics" else "medium",
+                annual_rent=metrics["annual_rent"],
+                estimated_expenses=metrics["estimated_expenses"],
+                estimated_profit=metrics["estimated_profit"],
+                roi_score=metrics["roi_score"],
+                break_even_occupancy=metrics["break_even_occupancy"],
+                strengths=metrics["strengths"],
+                weaknesses=metrics["weaknesses"],
+            )
+            
+            opportunities.append(opp)
+    
+    # Sort by ROI score (highest first)
+    opportunities.sort(key=lambda x: x.roi_score, reverse=True)
+    
+    # Limit results
+    opportunities = opportunities[:request.max_results]
+    
+    # Generate AI analysis if we have opportunities
+    ai_analysis = None
+    if opportunities and os.getenv("OPENAI_API_KEY"):
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            
+            # Summarize top opportunities for AI
+            top_summary = []
+            for opp in opportunities[:5]:
+                top_summary.append(
+                    f"- {opp.address}, {opp.city}: {opp.bedrooms}BR, "
+                    f"${opp.monthly_rent}/mo rent, ${opp.estimated_annual_revenue:,.0f}/yr STR revenue, "
+                    f"${opp.estimated_profit:,.0f}/yr profit, ROI score {opp.roi_score}/100"
+                )
+            
+            prompt = f"""Analyze these top rental arbitrage opportunities:
+
+{chr(10).join(top_summary)}
+
+Provide a brief (2-3 sentences) actionable summary:
+1. Which opportunity is best and why
+2. Key risk to watch out for
+3. Recommended next step"""
+
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "You are a real estate investment advisor. Be concise and actionable."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=200,
+                temperature=0.7,
+            )
+            ai_analysis = response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"AI analysis error: {str(e)}")
+    
+    return OpportunitySearchResponse(
+        opportunities=opportunities,
+        total_found=len(opportunities),
+        markets_searched=len(cities_to_search),
+        ai_analysis=ai_analysis,
+        search_criteria={
+            "cities": request.cities,
+            "min_bedrooms": request.min_bedrooms,
+            "max_bedrooms": request.max_bedrooms,
+            "min_profit": request.min_profit,
+        },
+        generated_at=datetime.now(),
+        listings_analyzed=listings_analyzed,
+        revenue_data_sources=revenue_sources,
+        warnings=warnings,
+    )
+
+
+@app.get("/api/opportunities/api-status")
+async def get_realtor_api_status():
+    """Check if Realtor.com API is configured and working"""
+    return await realtor_api.test_connection()
 
 
 # ==================== AI Investment Suggestions ====================

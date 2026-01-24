@@ -125,6 +125,13 @@ class ZillowListingResponse(ZillowListingBase):
     sale_price: Optional[float] = None
     has_creative_financing: bool = False
     financing_keywords: Optional[str] = None
+    # Agent/Contact information
+    agent_name: Optional[str] = None
+    agent_phone: Optional[str] = None
+    agent_email: Optional[str] = None
+    agent_company: Optional[str] = None
+    listing_source: str = 'zillow'  # 'zillow', 'realtor', 'manual'
+    photos: Optional[str] = None  # JSON array of photo URLs
     scraped_at: datetime
 
     class Config:
@@ -314,3 +321,74 @@ class AirbticsCityStatus(BaseModel):
     last_fetch: Optional[datetime] = None
     entries_count: int = 0
     needs_refresh: bool = False  # True if >6 months old
+
+
+# Opportunity Finder Schemas
+class OpportunitySearchRequest(BaseModel):
+    """Request to find arbitrage opportunities"""
+    cities: List[str]  # List of "City, ST" strings
+    min_bedrooms: int = 3
+    max_bedrooms: int = 8
+    min_profit: float = 0  # Minimum annual profit threshold
+    amenities: Optional[List[str]] = None  # Required amenities
+    max_results: int = 20  # Max opportunities to return
+
+
+class OpportunityListing(BaseModel):
+    """A rental listing with calculated opportunity metrics"""
+    # Listing details
+    listing_id: int
+    address: str
+    city: str
+    state: str
+    zip_code: Optional[str] = None
+    bedrooms: int
+    bathrooms: Optional[float] = None
+    sqft: Optional[int] = None
+    monthly_rent: float
+    url: Optional[str] = None
+    photos: Optional[List[str]] = None
+    
+    # Agent contact info
+    agent_name: Optional[str] = None
+    agent_phone: Optional[str] = None
+    agent_email: Optional[str] = None
+    agent_company: Optional[str] = None
+    listing_source: str = 'realtor'
+    
+    # Amenities
+    has_pool: bool = False
+    has_waterfront: bool = False
+    has_garage: bool = False
+    has_yard: bool = False
+    
+    # Revenue estimates (from Airbtics)
+    estimated_annual_revenue: float
+    revenue_source: str = 'airbtics'  # 'airbtics', 'airdna', 'estimated'
+    revenue_confidence: str = 'medium'  # 'low', 'medium', 'high'
+    
+    # Calculated profitability
+    annual_rent: float  # monthly_rent * 12
+    estimated_expenses: float  # Annual operating expenses
+    estimated_profit: float  # Revenue - rent - expenses
+    roi_score: int  # 1-100 opportunity score
+    break_even_occupancy: float  # Minimum occupancy to break even
+    
+    # Risk factors
+    strengths: List[str] = []
+    weaknesses: List[str] = []
+
+
+class OpportunitySearchResponse(BaseModel):
+    """Response from opportunity search"""
+    opportunities: List[OpportunityListing]
+    total_found: int
+    markets_searched: int
+    ai_analysis: Optional[str] = None  # AI-generated summary
+    search_criteria: dict
+    generated_at: datetime
+    
+    # Data quality info
+    listings_analyzed: int
+    revenue_data_sources: dict  # Count by source
+    warnings: List[str] = []
