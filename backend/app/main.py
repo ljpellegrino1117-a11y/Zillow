@@ -27,6 +27,7 @@ from .schemas import (
 from .scraper import scrape_zillow
 from . import airbtics
 from . import realtor_api
+from . import geocoding
 import math
 import json
 from datetime import timedelta
@@ -1793,50 +1794,261 @@ async def find_opportunities(
     """
     Find arbitrage opportunities by comparing rental listings with STR revenue data.
     
-    This is the main value-add feature:
-    1. Fetches rental listings from Realtor.com API (or existing DB)
-    2. Matches with Airbtics revenue data
-    3. Calculates profit potential
-    4. Ranks by ROI score
-    5. Provides AI analysis
+    Supports 4 search modes:
+    - "nationwide": Search all cities with Airbtics data
+    - "cities": Search specific cities
+    - "city_radius": Search a city + surrounding X miles
+    - "zip_code": Search by zip codes
     """
     opportunities = []
     warnings = []
     listings_analyzed = 0
     revenue_sources = {"airbtics": 0, "manual": 0, "estimated": 0}
-    
-    # Parse cities
     cities_to_search = []
-    for city_str in request.cities:
-        parts = city_str.split(",")
-        if len(parts) >= 2:
-            city_name = parts[0].strip()
-            state_code = parts[1].strip()
-            cities_to_search.append((city_name, state_code))
+    zip_codes_to_search = []
     
-    if not cities_to_search:
-        raise HTTPException(status_code=400, detail="No valid cities provided")
+    # Determine cities to search based on mode
+    search_mode = request.search_mode or "cities"
+    
+    if search_mode == "nationwide":
+        # Get all cities that have Airbtics data
+        cities_with_data = db.query(City).join(AirDNAData).distinct().all()
+        for city in cities_with_data:
+            cities_to_search.append((city.city, city.state))
+        
+        if not cities_to_search:
+            warnings.append("No cities with Airbtics data found. Run Airbtics sync first.")
+    
+    elif search_mode == "city_radius":
+        # Search city + surrounding area
+        if not request.city:
+            raise HTTPException(status_code=400, detail="City is required for city_radius mode")
+        
+        parts = request.city.split(",")
+        if len(parts) < 2:
+            raise HTTPException(status_code=400, detail="City must be in format 'City, ST'")
+        
+        center_city = parts[0].strip()
+        state_code = parts[1].strip()
+        radius = request.radius_miles or 25
+        
+        try:
+            # Get nearby cities using geocoding
+            nearby = await geocoding.get_nearby_cities(
+                city=center_city,
+                state=state_code,
+                radius_miles=radius,
+                exclude_center=not request.include_center_city
+            )
+            
+            for place in nearby:
+                cities_to_search.append((place["city"], place["state"]))
+            
+            if not cities_to_search:
+                warnings.append(f"No cities found within {radius} miles of {center_city}, {state_code}")
+                # Fallback to just the center city
+                if request.include_center_city:
+                    cities_to_search.append((center_city, state_code))
+        except Exception as e:
+            logger.error(f"Geocoding error: {str(e)}")
+            warnings.append(f"Geocoding failed: {str(e)}. Searching center city only.")
+            if request.include_center_city:
+                cities_to_search.append((center_city, state_code))
+    
+    elif search_mode == "zip_code":
+        # Search by zip codes
+        if not request.zip_codes or len(request.zip_codes) == 0:
+            raise HTTPException(status_code=400, detail="At least one zip code is required for zip_code mode")
+        
+        zip_codes_to_search = [z.strip() for z in request.zip_codes if z.strip()]
+        
+        if not zip_codes_to_search:
+            raise HTTPException(status_code=400, detail="No valid zip codes provided")
+    
+    else:  # "cities" mode (default)
+        if not request.cities or len(request.cities) == 0:
+            raise HTTPException(status_code=400, detail="At least one city is required")
+        
+        for city_str in request.cities:
+            parts = city_str.split(",")
+            if len(parts) >= 2:
+                city_name = parts[0].strip()
+                state_code = parts[1].strip()
+                cities_to_search.append((city_name, state_code))
+        
+        if not cities_to_search:
+            raise HTTPException(status_code=400, detail="No valid cities provided")
     
     # Check if Realtor API is configured
     use_realtor_api = realtor_api.is_configured()
     
+    # Helper function to analyze listings against revenue data
+    async def analyze_listings(listings, revenue_by_bedroom, default_city="", default_state="", revenue_data_lookup=None):
+        nonlocal listings_analyzed
+        local_opportunities = []
+        
+        for listing in listings:
+            listings_analyzed += 1
+            bedrooms = listing.get("bedrooms", 0)
+            
+            if bedrooms not in revenue_by_bedroom:
+                continue
+            
+            revenue_data = revenue_by_bedroom[bedrooms]
+            
+            metrics = calculate_opportunity_metrics(
+                listing,
+                {
+                    "average_annual_revenue": revenue_data.average_annual_revenue,
+                    "revenue_p50": revenue_data.revenue_p50,
+                    "revenue_p25": revenue_data.revenue_p25,
+                    "revenue_p75": revenue_data.revenue_p75,
+                },
+                bedrooms
+            )
+            
+            if metrics["estimated_profit"] < request.min_profit:
+                continue
+            
+            photos = listing.get("photos", [])
+            if isinstance(photos, str):
+                try:
+                    photos = json.loads(photos)
+                except:
+                    photos = []
+            
+            opp = OpportunityListing(
+                listing_id=listing.get("listing_id") or listing.get("property_id") or 0,
+                address=listing.get("address", ""),
+                city=listing.get("city", default_city),
+                state=listing.get("state", default_state),
+                zip_code=listing.get("zip_code"),
+                bedrooms=bedrooms,
+                bathrooms=listing.get("bathrooms"),
+                sqft=listing.get("sqft"),
+                monthly_rent=listing.get("price", 0),
+                url=listing.get("url"),
+                photos=photos[:5] if photos else None,
+                agent_name=listing.get("agent_name"),
+                agent_phone=listing.get("agent_phone"),
+                agent_email=listing.get("agent_email"),
+                agent_company=listing.get("agent_company"),
+                listing_source=listing.get("listing_source", "realtor"),
+                has_pool=listing.get("has_pool", False),
+                has_waterfront=listing.get("has_waterfront", False),
+                has_garage=listing.get("has_garage", False),
+                has_yard=listing.get("has_yard", False),
+                estimated_annual_revenue=metrics["estimated_annual_revenue"],
+                revenue_source=revenue_data.source or "airbtics",
+                revenue_confidence="high" if revenue_data.source == "airbtics" else "medium",
+                annual_rent=metrics["annual_rent"],
+                estimated_expenses=metrics["estimated_expenses"],
+                estimated_profit=metrics["estimated_profit"],
+                roi_score=metrics["roi_score"],
+                break_even_occupancy=metrics["break_even_occupancy"],
+                strengths=metrics["strengths"],
+                weaknesses=metrics["weaknesses"],
+            )
+            
+            local_opportunities.append(opp)
+        
+        return local_opportunities
+    
+    # Process by zip code if in zip_code mode
+    if zip_codes_to_search:
+        for zip_code in zip_codes_to_search:
+            # Look for revenue data by zip code
+            revenue_data_list = db.query(AirDNAData).filter(
+                AirDNAData.zip_code == zip_code
+            ).all()
+            
+            # If no zip-specific data, try to find city from existing data
+            if not revenue_data_list:
+                # Try to get city from any existing listing with this zip
+                existing = db.query(ZillowListing).filter(
+                    ZillowListing.zip_code == zip_code
+                ).first()
+                
+                if existing and existing.city_id:
+                    revenue_data_list = db.query(AirDNAData).filter(
+                        AirDNAData.city_id == existing.city_id
+                    ).all()
+            
+            if not revenue_data_list:
+                warnings.append(f"No revenue data for zip code {zip_code}")
+                continue
+            
+            # Build revenue lookup
+            revenue_by_bedroom = {}
+            for rd in revenue_data_list:
+                for br in range(rd.bedroom_min, rd.bedroom_max + 1):
+                    if br not in revenue_by_bedroom:
+                        revenue_by_bedroom[br] = rd
+                        revenue_sources[rd.source or "manual"] = revenue_sources.get(rd.source or "manual", 0) + 1
+            
+            # Get listings
+            listings = []
+            if use_realtor_api:
+                try:
+                    listings = await realtor_api.search_all_rentals_by_zip(
+                        zip_code=zip_code,
+                        min_beds=request.min_bedrooms,
+                        max_beds=request.max_bedrooms,
+                        max_listings=100
+                    )
+                except Exception as e:
+                    logger.error(f"Realtor API error for zip {zip_code}: {str(e)}")
+                    warnings.append(f"API error for zip {zip_code}: {str(e)}")
+            
+            # Fallback to database
+            if not listings:
+                db_listings = db.query(ZillowListing).filter(
+                    ZillowListing.zip_code == zip_code,
+                    ZillowListing.bedrooms >= request.min_bedrooms,
+                    ZillowListing.bedrooms <= request.max_bedrooms,
+                    ZillowListing.listing_type == 'rental'
+                ).all()
+                
+                listings = [{
+                    "listing_id": l.id,
+                    "address": l.address,
+                    "city": l.city,
+                    "state": l.state,
+                    "zip_code": l.zip_code,
+                    "bedrooms": l.bedrooms,
+                    "bathrooms": l.bathrooms,
+                    "price": l.price,
+                    "sqft": l.sqft,
+                    "url": l.url,
+                    "photos": json.loads(l.photos) if l.photos else [],
+                    "agent_name": l.agent_name,
+                    "agent_phone": l.agent_phone,
+                    "agent_email": l.agent_email,
+                    "agent_company": l.agent_company,
+                    "listing_source": l.listing_source or "zillow",
+                    "has_pool": l.has_pool,
+                    "has_waterfront": l.has_waterfront,
+                    "has_garage": l.has_garage,
+                    "has_yard": l.has_yard,
+                } for l in db_listings]
+            
+            zip_opps = await analyze_listings(listings, revenue_by_bedroom, "", "", None)
+            opportunities.extend(zip_opps)
+    
+    # Process by city
     for city_name, state_code in cities_to_search:
-        # Get or create city record
         city_record = db.query(City).filter(
             func.lower(City.city) == city_name.lower(),
             func.lower(City.state) == state_code.lower()
         ).first()
         
-        # Get revenue data for this city
         revenue_data_list = []
         if city_record:
             revenue_data_list = db.query(AirDNAData).filter(
                 AirDNAData.city_id == city_record.id
             ).all()
         
-        # Also check by city/state name directly
         if not revenue_data_list:
-            # Look up revenue data by city name (might be stored without city_id)
             from sqlalchemy import and_
             revenue_data_list = db.query(AirDNAData).join(City).filter(
                 func.lower(City.city) == city_name.lower(),
@@ -1847,7 +2059,6 @@ async def find_opportunities(
             warnings.append(f"No revenue data for {city_name}, {state_code}")
             continue
         
-        # Build revenue lookup by bedroom count
         revenue_by_bedroom = {}
         for rd in revenue_data_list:
             for br in range(rd.bedroom_min, rd.bedroom_max + 1):
@@ -1855,11 +2066,9 @@ async def find_opportunities(
                     revenue_by_bedroom[br] = rd
                     revenue_sources[rd.source or "manual"] = revenue_sources.get(rd.source or "manual", 0) + 1
         
-        # Get listings - either from Realtor API or existing database
         listings = []
         
         if use_realtor_api:
-            # Fetch fresh listings from Realtor.com
             try:
                 api_listings = await realtor_api.search_all_rentals(
                     city=city_name,
@@ -1873,7 +2082,6 @@ async def find_opportunities(
                 logger.error(f"Realtor API error for {city_name}: {str(e)}")
                 warnings.append(f"API error for {city_name}: {str(e)}")
         
-        # Fall back to database listings if API didn't return results
         if not listings and city_record:
             db_listings = db.query(ZillowListing).filter(
                 ZillowListing.city_id == city_record.id,
@@ -1905,76 +2113,8 @@ async def find_opportunities(
                 "has_yard": l.has_yard,
             } for l in db_listings]
         
-        # Analyze each listing
-        for listing in listings:
-            listings_analyzed += 1
-            bedrooms = listing.get("bedrooms", 0)
-            
-            # Skip if no revenue data for this bedroom count
-            if bedrooms not in revenue_by_bedroom:
-                continue
-            
-            revenue_data = revenue_by_bedroom[bedrooms]
-            
-            # Calculate metrics
-            metrics = calculate_opportunity_metrics(
-                listing,
-                {
-                    "average_annual_revenue": revenue_data.average_annual_revenue,
-                    "revenue_p50": revenue_data.revenue_p50,
-                    "revenue_p25": revenue_data.revenue_p25,
-                    "revenue_p75": revenue_data.revenue_p75,
-                },
-                bedrooms
-            )
-            
-            # Filter by minimum profit
-            if metrics["estimated_profit"] < request.min_profit:
-                continue
-            
-            # Parse photos
-            photos = listing.get("photos", [])
-            if isinstance(photos, str):
-                try:
-                    photos = json.loads(photos)
-                except:
-                    photos = []
-            
-            # Create opportunity object
-            opp = OpportunityListing(
-                listing_id=listing.get("listing_id") or listing.get("property_id") or 0,
-                address=listing.get("address", ""),
-                city=listing.get("city", city_name),
-                state=listing.get("state", state_code),
-                zip_code=listing.get("zip_code"),
-                bedrooms=bedrooms,
-                bathrooms=listing.get("bathrooms"),
-                sqft=listing.get("sqft"),
-                monthly_rent=listing.get("price", 0),
-                url=listing.get("url"),
-                photos=photos[:5] if photos else None,
-                agent_name=listing.get("agent_name"),
-                agent_phone=listing.get("agent_phone"),
-                agent_email=listing.get("agent_email"),
-                agent_company=listing.get("agent_company"),
-                listing_source=listing.get("listing_source", "realtor"),
-                has_pool=listing.get("has_pool", False),
-                has_waterfront=listing.get("has_waterfront", False),
-                has_garage=listing.get("has_garage", False),
-                has_yard=listing.get("has_yard", False),
-                estimated_annual_revenue=metrics["estimated_annual_revenue"],
-                revenue_source=revenue_data.source or "airbtics",
-                revenue_confidence="high" if revenue_data.source == "airbtics" else "medium",
-                annual_rent=metrics["annual_rent"],
-                estimated_expenses=metrics["estimated_expenses"],
-                estimated_profit=metrics["estimated_profit"],
-                roi_score=metrics["roi_score"],
-                break_even_occupancy=metrics["break_even_occupancy"],
-                strengths=metrics["strengths"],
-                weaknesses=metrics["weaknesses"],
-            )
-            
-            opportunities.append(opp)
+        city_opps = await analyze_listings(listings, revenue_by_bedroom, city_name, state_code, None)
+        opportunities.extend(city_opps)
     
     # Sort by ROI score (highest first)
     opportunities.sort(key=lambda x: x.roi_score, reverse=True)
@@ -1989,7 +2129,6 @@ async def find_opportunities(
             from openai import OpenAI
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             
-            # Summarize top opportunities for AI
             top_summary = []
             for opp in opportunities[:5]:
                 top_summary.append(
@@ -2020,13 +2159,22 @@ Provide a brief (2-3 sentences) actionable summary:
         except Exception as e:
             logger.error(f"AI analysis error: {str(e)}")
     
+    # Build search criteria response
+    search_criteria_cities = request.cities or []
+    if search_mode == "city_radius" and request.city:
+        search_criteria_cities = [request.city]
+    elif search_mode == "nationwide":
+        search_criteria_cities = [f"{c[0]}, {c[1]}" for c in cities_to_search[:10]]  # First 10
+    elif search_mode == "zip_code":
+        search_criteria_cities = request.zip_codes or []
+    
     return OpportunitySearchResponse(
         opportunities=opportunities,
         total_found=len(opportunities),
-        markets_searched=len(cities_to_search),
+        markets_searched=len(cities_to_search) + len(zip_codes_to_search),
         ai_analysis=ai_analysis,
         search_criteria={
-            "cities": request.cities,
+            "cities": search_criteria_cities,
             "min_bedrooms": request.min_bedrooms,
             "max_bedrooms": request.max_bedrooms,
             "min_profit": request.min_profit,
@@ -2042,6 +2190,208 @@ Provide a brief (2-3 sentences) actionable summary:
 async def get_realtor_api_status():
     """Check if Realtor.com API is configured and working"""
     return await realtor_api.test_connection()
+
+
+# ==================== API Testing & Data Verification ====================
+
+@app.get("/api/airbtics/data-status")
+async def get_airbtics_data_status(db: Session = Depends(get_db)):
+    """
+    Get comprehensive status of Airbtics data in the database.
+    Returns markets available for nationwide search and data freshness info.
+    """
+    from datetime import datetime, timedelta
+    
+    # Get all Airbtics data entries
+    all_data = db.query(AirDNAData).filter(
+        AirDNAData.source == 'airbtics'
+    ).all()
+    
+    # Get unique cities with Airbtics data
+    cities_with_data = db.query(City).join(AirDNAData).filter(
+        AirDNAData.source == 'airbtics'
+    ).distinct().all()
+    
+    # Calculate data freshness
+    six_months_ago = datetime.utcnow() - timedelta(days=180)
+    fresh_count = 0
+    stale_count = 0
+    
+    for entry in all_data:
+        if entry.last_api_fetch and entry.last_api_fetch > six_months_ago:
+            fresh_count += 1
+        else:
+            stale_count += 1
+    
+    # Group by city for detailed breakdown
+    markets = []
+    for city in cities_with_data:
+        city_data = db.query(AirDNAData).filter(
+            AirDNAData.city_id == city.id,
+            AirDNAData.source == 'airbtics'
+        ).all()
+        
+        bedroom_ranges = set()
+        latest_fetch = None
+        for d in city_data:
+            bedroom_ranges.add(f"{d.bedroom_min}-{d.bedroom_max}")
+            if d.last_api_fetch:
+                if not latest_fetch or d.last_api_fetch > latest_fetch:
+                    latest_fetch = d.last_api_fetch
+        
+        is_fresh = latest_fetch and latest_fetch > six_months_ago if latest_fetch else False
+        
+        markets.append({
+            "city": city.city,
+            "state": city.state,
+            "entries_count": len(city_data),
+            "bedroom_ranges": list(bedroom_ranges),
+            "last_fetch": latest_fetch.isoformat() if latest_fetch else None,
+            "is_fresh": is_fresh,
+            "needs_refresh": not is_fresh
+        })
+    
+    # Sort markets by city name
+    markets.sort(key=lambda x: x["city"])
+    
+    return {
+        "status": "ok",
+        "total_entries": len(all_data),
+        "total_markets": len(cities_with_data),
+        "fresh_entries": fresh_count,
+        "stale_entries": stale_count,
+        "data_freshness_ratio": round(fresh_count / len(all_data), 2) if all_data else 0,
+        "markets": markets,
+        "database_type": "PostgreSQL" if not is_sqlite else "SQLite",
+        "available_for_nationwide_search": len(cities_with_data) > 0
+    }
+
+
+@app.get("/api/test/realtor-api")
+async def test_realtor_api():
+    """Test Realtor.com API connectivity"""
+    return await realtor_api.test_connection()
+
+
+@app.get("/api/test/airbtics-api")
+async def test_airbtics_api():
+    """Test Airbtics API connectivity"""
+    try:
+        # Test market search
+        result = await airbtics.search_market("Austin", "TX")
+        
+        if result and result.get("market_id"):
+            return {
+                "status": "ok",
+                "message": "Airbtics API connected successfully",
+                "configured": True,
+                "test_market": "Austin, TX",
+                "market_id": result["market_id"]
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Airbtics API returned empty result",
+                "configured": bool(os.getenv("AIRBTICS_API_KEY")),
+                "result": result
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "configured": bool(os.getenv("AIRBTICS_API_KEY"))
+        }
+
+
+@app.get("/api/test/database")
+async def test_database(db: Session = Depends(get_db)):
+    """Test database connectivity and return stats"""
+    try:
+        # Count records in each table
+        city_count = db.query(City).count()
+        listing_count = db.query(ZillowListing).count()
+        airdna_count = db.query(AirDNAData).count()
+        airbtics_market_count = db.query(AirbticsMarket).count()
+        
+        # Check for Airbtics data specifically
+        airbtics_data_count = db.query(AirDNAData).filter(
+            AirDNAData.source == 'airbtics'
+        ).count()
+        
+        return {
+            "status": "ok",
+            "database_type": "PostgreSQL" if not is_sqlite else "SQLite",
+            "database_url_prefix": DATABASE_URL[:30] + "..." if len(DATABASE_URL) > 30 else DATABASE_URL,
+            "record_counts": {
+                "cities": city_count,
+                "listings": listing_count,
+                "airdna_revenue_entries": airdna_count,
+                "airbtics_revenue_entries": airbtics_data_count,
+                "airbtics_market_cache": airbtics_market_count
+            },
+            "airbtics_data_stored": airbtics_data_count > 0,
+            "ready_for_search": airbtics_data_count > 0
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "database_type": "PostgreSQL" if not is_sqlite else "SQLite"
+        }
+
+
+@app.get("/api/test/all")
+async def test_all_apis(db: Session = Depends(get_db)):
+    """Run all API tests and return combined status"""
+    results = {
+        "timestamp": datetime.now().isoformat(),
+        "tests": {}
+    }
+    
+    # Test Realtor API
+    try:
+        realtor_result = await realtor_api.test_connection()
+        results["tests"]["realtor_api"] = {
+            "status": realtor_result.get("status", "unknown"),
+            "configured": realtor_result.get("configured", False),
+            "message": realtor_result.get("message", "")
+        }
+    except Exception as e:
+        results["tests"]["realtor_api"] = {
+            "status": "error",
+            "configured": False,
+            "message": str(e)
+        }
+    
+    # Test Airbtics API
+    try:
+        airbtics_result = await test_airbtics_api()
+        results["tests"]["airbtics_api"] = airbtics_result
+    except Exception as e:
+        results["tests"]["airbtics_api"] = {
+            "status": "error",
+            "configured": False,
+            "message": str(e)
+        }
+    
+    # Test Database
+    try:
+        db_result = await test_database(db)
+        results["tests"]["database"] = db_result
+    except Exception as e:
+        results["tests"]["database"] = {
+            "status": "error",
+            "message": str(e)
+        }
+    
+    # Overall status
+    all_ok = all(
+        t.get("status") == "ok" 
+        for t in results["tests"].values()
+    )
+    results["overall_status"] = "ok" if all_ok else "partial" if any(t.get("status") == "ok" for t in results["tests"].values()) else "error"
+    
+    return results
 
 
 # ==================== AI Investment Suggestions ====================

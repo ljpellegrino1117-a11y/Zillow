@@ -37,9 +37,26 @@ interface Props {
   refreshTrigger?: number;
 }
 
+// Search modes
+type SearchMode = 'nationwide' | 'cities' | 'city_radius' | 'zip_code';
+
 export default function OpportunityFinder({ refreshTrigger }: Props) {
+  // Search mode state
+  const [searchMode, setSearchMode] = useState<SearchMode>('cities');
+  
+  // Cities mode state
   const [cities, setCities] = useState<City[]>([]);
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
+  
+  // City radius mode state
+  const [radiusCity, setRadiusCity] = useState('');
+  const [radiusMiles, setRadiusMiles] = useState(25);
+  const [includeCenterCity, setIncludeCenterCity] = useState(true);
+  
+  // Zip code mode state
+  const [zipCodes, setZipCodes] = useState('');
+  
+  // Common filters
   const [minBedrooms, setMinBedrooms] = useState(3);
   const [maxBedrooms, setMaxBedrooms] = useState(8);
   const [minProfit, setMinProfit] = useState(0);
@@ -57,12 +74,6 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
       try {
         const citiesData = await getCities();
         setCities(citiesData);
-        // Auto-select first 3 cities
-        if (citiesData.length > 0) {
-          setSelectedCities(
-            citiesData.slice(0, 3).map(c => `${c.city}, ${c.state}`)
-          );
-        }
       } catch (err) {
         console.error('Failed to load cities:', err);
       }
@@ -82,8 +93,17 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
   }, [refreshTrigger]);
 
   const handleSearch = async () => {
-    if (selectedCities.length === 0) {
+    // Validate based on search mode
+    if (searchMode === 'cities' && selectedCities.length === 0) {
       setError('Please select at least one city');
+      return;
+    }
+    if (searchMode === 'city_radius' && !radiusCity.trim()) {
+      setError('Please enter a city for radius search');
+      return;
+    }
+    if (searchMode === 'zip_code' && !zipCodes.trim()) {
+      setError('Please enter at least one zip code');
       return;
     }
     
@@ -91,13 +111,27 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
     setError(null);
     
     try {
-      const response = await findOpportunities({
-        cities: selectedCities,
+      // Build request based on search mode
+      const request: any = {
+        search_mode: searchMode,
         min_bedrooms: minBedrooms,
         max_bedrooms: maxBedrooms,
         min_profit: minProfit,
         max_results: 20
-      });
+      };
+      
+      if (searchMode === 'cities') {
+        request.cities = selectedCities;
+      } else if (searchMode === 'city_radius') {
+        request.city = radiusCity;
+        request.radius_miles = radiusMiles;
+        request.include_center_city = includeCenterCity;
+      } else if (searchMode === 'zip_code') {
+        request.zip_codes = zipCodes.split(',').map(z => z.trim()).filter(z => z);
+      }
+      // nationwide mode doesn't need extra params
+      
+      const response = await findOpportunities(request);
       setResults(response);
     } catch (err: any) {
       console.error('Search failed:', err);
@@ -433,34 +467,158 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
 
       {/* Search Controls */}
       <div className="bg-white rounded-xl p-5 mb-6 border border-blue-100">
-        {/* City Selection */}
+        {/* Search Mode Selector */}
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Select Markets to Search
+            Search Mode
           </label>
           <div className="flex flex-wrap gap-2">
-            {cities.map(city => {
-              const cityStr = `${city.city}, ${city.state}`;
-              const isSelected = selectedCities.includes(cityStr);
-              return (
-                <button
-                  key={city.id}
-                  onClick={() => toggleCity(cityStr)}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    isSelected
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  {city.city}, {city.state}
-                </button>
-              );
-            })}
-            {cities.length === 0 && (
-              <p className="text-gray-500 text-sm">No cities configured. Add cities first.</p>
-            )}
+            <button
+              onClick={() => setSearchMode('nationwide')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                searchMode === 'nationwide'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <MapPin className="h-4 w-4" />
+              All Markets (Nationwide)
+            </button>
+            <button
+              onClick={() => setSearchMode('cities')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                searchMode === 'cities'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <Building className="h-4 w-4" />
+              Specific Cities
+            </button>
+            <button
+              onClick={() => setSearchMode('city_radius')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                searchMode === 'city_radius'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <Home className="h-4 w-4" />
+              City + Radius
+            </button>
+            <button
+              onClick={() => setSearchMode('zip_code')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                searchMode === 'zip_code'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <MapPin className="h-4 w-4" />
+              Zip Code
+            </button>
           </div>
         </div>
+
+        {/* Mode-specific inputs */}
+        {searchMode === 'nationwide' && (
+          <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="flex items-center gap-2 text-blue-700">
+              <Sparkles className="h-5 w-5" />
+              <span className="font-medium">Nationwide Search</span>
+            </div>
+            <p className="text-sm text-blue-600 mt-1">
+              Will search all markets that have Airbtics revenue data stored. This may take longer for large datasets.
+            </p>
+          </div>
+        )}
+
+        {searchMode === 'cities' && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Cities
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {cities.map(city => {
+                const cityStr = `${city.city}, ${city.state}`;
+                const isSelected = selectedCities.includes(cityStr);
+                return (
+                  <button
+                    key={city.id}
+                    onClick={() => toggleCity(cityStr)}
+                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                      isSelected
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {city.city}, {city.state}
+                  </button>
+                );
+              })}
+              {cities.length === 0 && (
+                <p className="text-gray-500 text-sm">No cities configured. Add cities first, or use Nationwide search to search all markets with data.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {searchMode === 'city_radius' && (
+          <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                City (e.g., Austin, TX)
+              </label>
+              <input
+                type="text"
+                value={radiusCity}
+                onChange={(e) => setRadiusCity(e.target.value)}
+                placeholder="Enter city, state (e.g., Austin, TX)"
+                className="input w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Radius (miles)
+              </label>
+              <input
+                type="number"
+                value={radiusMiles}
+                onChange={(e) => setRadiusMiles(Number(e.target.value))}
+                min={5}
+                max={100}
+                className="input w-full"
+              />
+            </div>
+            <div className="md:col-span-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeCenterCity}
+                  onChange={(e) => setIncludeCenterCity(e.target.checked)}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">Include center city in results</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {searchMode === 'zip_code' && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Zip Codes (comma-separated)
+            </label>
+            <input
+              type="text"
+              value={zipCodes}
+              onChange={(e) => setZipCodes(e.target.value)}
+              placeholder="e.g., 78701, 78702, 78703"
+              className="input w-full"
+            />
+            <p className="text-xs text-gray-500 mt-1">Enter one or more zip codes separated by commas</p>
+          </div>
+        )}
 
         {/* Filters Row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -514,7 +672,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
           <div className="flex items-end">
             <button
               onClick={handleSearch}
-              disabled={loading || selectedCities.length === 0}
+              disabled={loading || (searchMode === 'cities' && selectedCities.length === 0) || (searchMode === 'city_radius' && !radiusCity.trim()) || (searchMode === 'zip_code' && !zipCodes.trim())}
               className="btn btn-primary w-full"
             >
               {loading ? (

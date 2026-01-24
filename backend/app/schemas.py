@@ -326,7 +326,21 @@ class AirbticsCityStatus(BaseModel):
 # Opportunity Finder Schemas
 class OpportunitySearchRequest(BaseModel):
     """Request to find arbitrage opportunities"""
-    cities: List[str]  # List of "City, ST" strings
+    # Search mode: "nationwide", "cities", "city_radius", "zip_code"
+    search_mode: str = "cities"
+    
+    # For "cities" mode - select specific cities
+    cities: Optional[List[str]] = None  # List of "City, ST" strings
+    
+    # For "city_radius" mode - search city + surrounding area
+    city: Optional[str] = None  # Single city e.g., "Austin, TX"
+    radius_miles: Optional[int] = None  # Radius in miles
+    include_center_city: bool = True  # Include the main city or only surrounding
+    
+    # For "zip_code" mode - search by zip codes
+    zip_codes: Optional[List[str]] = None  # List of zip codes
+    
+    # Common filters
     min_bedrooms: int = 3
     max_bedrooms: int = 8
     min_profit: float = 0  # Minimum annual profit threshold

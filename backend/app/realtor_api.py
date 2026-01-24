@@ -271,6 +271,148 @@ async def search_all_rentals(
     return all_listings[:max_listings]
 
 
+async def search_rentals_by_zip(
+    zip_code: str,
+    min_beds: int = 3,
+    max_beds: int = 8,
+    limit: int = 200,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """
+    Search for rental listings by zip code.
+    
+    Args:
+        zip_code: ZIP code (e.g., "78701")
+        min_beds: Minimum bedrooms
+        max_beds: Maximum bedrooms
+        limit: Max results per request (max 200)
+        offset: Pagination offset
+    
+    Returns:
+        Dict with 'listings' and 'total_count'
+    """
+    if not RAPIDAPI_KEY:
+        logger.warning("RAPIDAPI_KEY not configured - returning empty results")
+        return {"listings": [], "total_count": 0, "error": "API key not configured"}
+    
+    url = f"{BASE_URL}/properties/v3/list"
+    
+    payload = {
+        "limit": min(limit, 200),
+        "offset": offset,
+        "postal_code": zip_code,
+        "status": ["for_rent"],
+        "beds_min": min_beds,
+        "beds_max": max_beds,
+        "sort": {
+            "direction": "desc",
+            "field": "list_date"
+        }
+    }
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    url,
+                    headers=get_headers(),
+                    json=payload
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    results = data.get("data", {}).get("home_search", {}).get("results", [])
+                    total = data.get("data", {}).get("home_search", {}).get("total", 0)
+                    
+                    listings = []
+                    for result in results:
+                        listing = parse_listing(result)
+                        if listing:
+                            listings.append(listing)
+                    
+                    logger.info(f"Found {len(listings)} rentals in zip code {zip_code}")
+                    return {
+                        "listings": listings,
+                        "total_count": total,
+                        "offset": offset
+                    }
+                
+                elif response.status_code == 429:
+                    wait_time = (attempt + 1) * 2
+                    logger.warning(f"Rate limited, waiting {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                elif response.status_code in [401, 403]:
+                    logger.error(f"Authentication error: {response.status_code}")
+                    return {"listings": [], "total_count": 0, "error": "Authentication failed"}
+                
+                else:
+                    logger.error(f"API error {response.status_code}: {response.text[:200]}")
+                    
+        except httpx.TimeoutException:
+            logger.warning(f"Timeout on attempt {attempt + 1}")
+            await asyncio.sleep(API_RATE_LIMIT_DELAY)
+        except Exception as e:
+            logger.error(f"Request error: {str(e)}")
+            await asyncio.sleep(API_RATE_LIMIT_DELAY)
+    
+    return {"listings": [], "total_count": 0, "error": "Max retries exceeded"}
+
+
+async def search_all_rentals_by_zip(
+    zip_code: str,
+    min_beds: int = 3,
+    max_beds: int = 8,
+    max_listings: int = 500,
+) -> List[Dict[str, Any]]:
+    """
+    Search for all rental listings in a zip code, handling pagination.
+    
+    Args:
+        zip_code: ZIP code
+        min_beds: Minimum bedrooms
+        max_beds: Maximum bedrooms
+        max_listings: Maximum total listings to fetch
+    
+    Returns:
+        List of all listings
+    """
+    all_listings = []
+    offset = 0
+    limit = 200
+    
+    while len(all_listings) < max_listings:
+        result = await search_rentals_by_zip(
+            zip_code=zip_code,
+            min_beds=min_beds,
+            max_beds=max_beds,
+            limit=limit,
+            offset=offset
+        )
+        
+        if result.get("error"):
+            logger.error(f"Search error: {result['error']}")
+            break
+        
+        listings = result.get("listings", [])
+        if not listings:
+            break
+        
+        all_listings.extend(listings)
+        
+        total = result.get("total_count", 0)
+        offset += len(listings)
+        
+        if offset >= total:
+            break
+        
+        await asyncio.sleep(API_RATE_LIMIT_DELAY)
+    
+    logger.info(f"Total listings fetched for zip {zip_code}: {len(all_listings)}")
+    return all_listings[:max_listings]
+
+
 async def get_listing_details(property_id: str) -> Optional[Dict[str, Any]]:
     """
     Get detailed information about a specific property.

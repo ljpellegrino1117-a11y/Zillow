@@ -742,7 +742,21 @@ export interface OpportunityListing {
 }
 
 export interface OpportunitySearchRequest {
-  cities: string[];
+  // Search mode: "nationwide", "cities", "city_radius", "zip_code"
+  search_mode?: string;
+  
+  // For "cities" mode - select specific cities
+  cities?: string[];
+  
+  // For "city_radius" mode - search city + surrounding area
+  city?: string;  // Single city e.g., "Austin, TX"
+  radius_miles?: number;
+  include_center_city?: boolean;
+  
+  // For "zip_code" mode - search by zip codes
+  zip_codes?: string[];
+  
+  // Common filters
   min_bedrooms?: number;
   max_bedrooms?: number;
   min_profit?: number;
