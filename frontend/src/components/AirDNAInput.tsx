@@ -602,30 +602,32 @@ export default function AirDNAInput({ onDataSaved, refreshTrigger }: Props) {
         {showCitySelector && (
           <div className="bg-white rounded-lg p-3 mb-3 border border-blue-200">
             <div className="flex gap-2 mb-2">
-              <div className="flex-1">
-                <CityAutocomplete
-                  value={syncCityInput}
-                  onChange={(city, state) => {
-                    setSyncCityInput(city);
-                    if (state) setSyncStateInput(state);
-                  }}
-                  placeholder="Type city name..."
-                />
-              </div>
+              {/* City Input - takes most of the space */}
+              <CityAutocomplete
+                value={syncCityInput}
+                onChange={(city, state) => {
+                  setSyncCityInput(city);
+                  if (state) setSyncStateInput(state);
+                }}
+                placeholder="Type city name..."
+                className="flex-1 min-w-0"
+              />
+              {/* State Dropdown - fixed small width */}
               <select
                 value={syncStateInput}
                 onChange={(e) => setSyncStateInput(e.target.value)}
-                className="input w-20 text-sm"
+                className="input w-16 text-sm flex-shrink-0"
               >
-                <option value="">State</option>
+                <option value="">ST</option>
                 {['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'].map(s => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
+              {/* Add Button */}
               <button
                 onClick={handleAddSyncCity}
                 disabled={!syncCityInput || !syncStateInput}
-                className="btn btn-sm bg-blue-500 hover:bg-blue-600 text-white px-2"
+                className="btn btn-sm bg-blue-500 hover:bg-blue-600 text-white px-2 flex-shrink-0"
               >
                 <Plus className="h-4 w-4" />
               </button>

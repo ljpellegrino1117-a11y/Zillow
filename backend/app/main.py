@@ -553,15 +553,18 @@ async def run_scrape_job(
                 db.commit()
                 db.refresh(city_obj)
             
-            # Get all existing active listings for this city
+            # Get ALL existing listings for this city (active and rented)
+            # This is important because we need to update/reactivate listings, not re-insert
             existing_listings = db.query(ZillowListing).filter(
-                ZillowListing.city_id == city_obj.id,
-                ZillowListing.status == 'active'
+                ZillowListing.city_id == city_obj.id
             ).all()
-            existing_by_id = {l.zillow_id: l for l in existing_listings}
-            existing_by_address = {_normalize_address(l.address): l for l in existing_listings}
+            active_listings = [l for l in existing_listings if l.status == 'active']
             
-            # Track which listings we've seen in this scrape
+            # Build lookup dicts for ALL listings (not just active)
+            existing_by_id = {l.zillow_id: l for l in existing_listings}
+            existing_by_address = {_normalize_address(l.address): l for l in existing_listings if l.address}
+            
+            # Track which listings we've seen in this scrape (for marking rented)
             seen_ids = set()
             seen_addresses = set()
             new_count = 0
@@ -589,37 +592,47 @@ async def run_scrape_job(
                 seen_ids.add(listing_id)
                 seen_addresses.add(addr_key)
                 
-                # Check if we already have this listing (by ID or address)
+                # Check if we already have this listing (by ID or address) - includes rented!
                 existing = existing_by_id.get(listing_id) or existing_by_address.get(addr_key)
                 
                 if existing:
-                    # Update existing listing
+                    # Update existing listing (this also re-activates if it was rented)
                     _update_listing_from_data(existing, listing_data)
                     # Update source if now found in both
                     if source == 'both':
                         existing.listing_source = 'both'
                     updated_count += 1
                 else:
-                    # Check if exists but was marked rented (re-listed)
-                    rented_existing = db.query(ZillowListing).filter(
+                    # Also check globally (listing might be in different city record)
+                    global_existing = db.query(ZillowListing).filter(
                         ZillowListing.zillow_id == listing_id
                     ).first()
-                    if rented_existing:
-                        rented_existing.city_id = city_obj.id
-                        _update_listing_from_data(rented_existing, listing_data)
+                    
+                    if not global_existing and addr_key:
+                        # Check by address globally too
+                        global_existing = db.query(ZillowListing).filter(
+                            ZillowListing.address.ilike(f"%{listing_data.get('address', '')[:30]}%")
+                        ).first()
+                    
+                    if global_existing:
+                        global_existing.city_id = city_obj.id
+                        _update_listing_from_data(global_existing, listing_data)
+                        # Add to our local lookup for future reference
+                        existing_by_id[listing_id] = global_existing
                         updated_count += 1
                     else:
-                        # New listing
+                        # Truly new listing
                         new_listing = _create_listing_from_data(listing_data, city_obj.id, source=source)
                         db.add(new_listing)
+                        existing_by_id[listing_id] = new_listing  # Track to avoid re-adding
                         new_count += 1
             
-            # Mark listings not seen in this scrape as 'rented'
+            # Mark active listings not seen in this scrape as 'rented'
             # (they're no longer on the market - assume rented)
             rented_count = 0
             now = datetime.utcnow()
-            for listing in existing_listings:
-                addr_key = _normalize_address(listing.address)
+            for listing in active_listings:  # Only check previously active listings
+                addr_key = _normalize_address(listing.address) if listing.address else ""
                 if listing.zillow_id not in seen_ids and addr_key not in seen_addresses:
                     listing.status = 'rented'
                     listing.marked_rented_at = now

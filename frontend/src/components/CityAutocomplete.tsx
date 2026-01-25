@@ -130,7 +130,7 @@ export default function CityAutocomplete({ value, onChange, placeholder = "e.g.,
   };
 
   return (
-    <div className="relative">
+    <div className={`relative ${className}`}>
       <input
         ref={inputRef}
         type="text"
@@ -140,7 +140,7 @@ export default function CityAutocomplete({ value, onChange, placeholder = "e.g.,
         onFocus={handleFocus}
         onBlur={handleBlur}
         placeholder={placeholder}
-        className={`input ${className}`}
+        className="input w-full"
         autoComplete="off"
       />
       
