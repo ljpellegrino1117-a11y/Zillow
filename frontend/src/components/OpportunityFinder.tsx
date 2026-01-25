@@ -18,27 +18,16 @@ import {
   Home,
   Sparkles,
   Building,
-  RefreshCw,
-  Download,
   FileText,
   FileSpreadsheet,
-  Calendar,
-  Zap,
-  Clock,
   X
 } from 'lucide-react';
+import { useData, useCitiesWithData } from '@/context/DataContext';
 import { 
   findOpportunities, 
   getRealtorApiStatus,
-  getCities,
-  getAirbticsCityStatuses,
-  getEventsForUserMarkets,
-  OpportunityListing, 
   OpportunitySearchResponse,
-  RealtorApiStatus,
-  City,
-  AirbticsCityStatus,
-  UserMarketEventsResponse
+  RealtorApiStatus
 } from '@/lib/api';
 
 interface Props {
@@ -46,24 +35,20 @@ interface Props {
 }
 
 // Search modes
-type SearchMode = 'nationwide' | 'cities' | 'city_radius' | 'zip_code';
+type SearchMode = 'nationwide' | 'cities' | 'city_radius';
 
 export default function OpportunityFinder({ refreshTrigger }: Props) {
+  const { cities, cityStatuses, isLoading: dataLoading } = useData();
+  const citiesWithData = useCitiesWithData();
+  
   // Search mode state
   const [searchMode, setSearchMode] = useState<SearchMode>('cities');
-  
-  // Cities mode state
-  const [cities, setCities] = useState<City[]>([]);
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
-  const [cityDataStatus, setCityDataStatus] = useState<Record<string, AirbticsCityStatus>>({});
   
   // City radius mode state
   const [radiusCity, setRadiusCity] = useState('');
   const [radiusMiles, setRadiusMiles] = useState(25);
   const [includeCenterCity, setIncludeCenterCity] = useState(true);
-  
-  // Zip code mode state
-  const [zipCodes, setZipCodes] = useState('');
   
   // Common filters
   const [minBedrooms, setMinBedrooms] = useState(3);
@@ -74,12 +59,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<RealtorApiStatus | null>(null);
-  
   const [expandedOpportunity, setExpandedOpportunity] = useState<number | null>(null);
-  
-  // Events state
-  const [marketEvents, setMarketEvents] = useState<UserMarketEventsResponse | null>(null);
-  const [eventsLoading, setEventsLoading] = useState(false);
   
   // Abort controller for cancelling searches
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -93,86 +73,16 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
     setLoading(false);
   }, []);
 
-  // Load cities, data status, and events on mount
+  // Build city data status lookup
+  const cityDataStatus = cityStatuses.reduce((acc, status) => {
+    acc[`${status.city}, ${status.state}`] = status;
+    return acc;
+  }, {} as Record<string, typeof cityStatuses[0]>);
+
+  // Load API status on mount
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [citiesData, cityStatuses, apiStatusData] = await Promise.all([
-          getCities(),
-          getAirbticsCityStatuses(),
-          getRealtorApiStatus().catch(() => null)
-        ]);
-        
-        setCities(citiesData);
-        
-        // Build lookup map for city data status
-        const statusMap: Record<string, AirbticsCityStatus> = {};
-        cityStatuses.forEach(status => {
-          const key = `${status.city}, ${status.state}`;
-          statusMap[key] = status;
-        });
-        setCityDataStatus(statusMap);
-        
-        if (apiStatusData) {
-          setApiStatus(apiStatusData);
-        }
-        
-        // Load events for user's markets
-        try {
-          setEventsLoading(true);
-          const events = await getEventsForUserMarkets();
-          setMarketEvents(events);
-        } catch (err) {
-          console.error('Failed to load events:', err);
-        } finally {
-          setEventsLoading(false);
-        }
-      } catch (err) {
-        console.error('Failed to load data:', err);
-      }
-    };
-    
-    loadData();
-  }, [refreshTrigger]);
-  
-  // Helper to check if a city has upcoming events
-  const getCityEvents = (city: string, state: string) => {
-    if (!marketEvents) return null;
-    
-    const cityLower = city.toLowerCase();
-    const stateLower = state.toLowerCase();
-    
-    // Check all urgency levels for events in this city
-    const allEvents = [
-      ...marketEvents.urgent,
-      ...marketEvents.high,
-      ...marketEvents.medium,
-      ...marketEvents.strategic
-    ];
-    
-    const cityEvents = allEvents.filter(e => 
-      e.city.toLowerCase() === cityLower && 
-      e.state.toLowerCase() === stateLower
-    );
-    
-    if (cityEvents.length === 0) return null;
-    
-    // Get the most urgent event
-    const urgentEvent = marketEvents.urgent.find(e => 
-      e.city.toLowerCase() === cityLower && e.state.toLowerCase() === stateLower
-    );
-    const highEvent = marketEvents.high.find(e => 
-      e.city.toLowerCase() === cityLower && e.state.toLowerCase() === stateLower
-    );
-    
-    return {
-      events: cityEvents,
-      mostUrgent: urgentEvent || highEvent || cityEvents[0],
-      count: cityEvents.length,
-      hasUrgent: !!urgentEvent,
-      hasHigh: !!highEvent
-    };
-  };
+    getRealtorApiStatus().then(setApiStatus).catch(() => {});
+  }, []);
   
   // Helper to get city data info
   const getCityDataInfo = (cityStr: string) => {
@@ -188,9 +98,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
   // Count cities with/without data
   const selectedWithData = selectedCities.filter(c => getCityDataInfo(c).hasData).length;
   const selectedWithoutData = selectedCities.length - selectedWithData;
-  
-  // Count total markets with data (for nationwide search info)
-  const totalMarketsWithData = Object.values(cityDataStatus).filter(s => s.has_airbtics_data).length;
+  const totalMarketsWithData = citiesWithData.length;
 
   const handleSearch = async () => {
     // Validate based on search mode
@@ -202,28 +110,19 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
       setError('Please enter a city for radius search');
       return;
     }
-    if (searchMode === 'zip_code' && !zipCodes.trim()) {
-      setError('Please enter at least one zip code');
-      return;
-    }
     
-    // Cancel any existing search
     cancelSearch();
-    
-    // Create new abort controller
     abortControllerRef.current = new AbortController();
-    
     setLoading(true);
     setError(null);
     
     try {
-      // Build request based on search mode
       const request: any = {
         search_mode: searchMode,
         min_bedrooms: minBedrooms,
         max_bedrooms: maxBedrooms,
         min_profit: minProfit,
-        max_results: 50  // Increased to show more opportunities
+        max_results: 50
       };
       
       if (searchMode === 'cities') {
@@ -232,25 +131,16 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
         request.city = radiusCity;
         request.radius_miles = radiusMiles;
         request.include_center_city = includeCenterCity;
-      } else if (searchMode === 'zip_code') {
-        request.zip_codes = zipCodes.split(',').map(z => z.trim()).filter(z => z);
       }
-      // nationwide mode doesn't need extra params
       
       const response = await findOpportunities(request);
       
-      // Only update if not aborted
       if (!abortControllerRef.current?.signal.aborted) {
         setResults(response);
       }
     } catch (err: any) {
-      // Ignore abort errors
-      if (err.name === 'AbortError' || err.message === 'canceled') {
-        return;
-      }
-      console.error('Search failed:', err);
-      const errorMessage = err.response?.data?.detail || err.message || 'Failed to search for opportunities';
-      setError(errorMessage);
+      if (err.name === 'AbortError' || err.message === 'canceled') return;
+      setError(err.response?.data?.detail || 'Search failed');
     } finally {
       if (!abortControllerRef.current?.signal.aborted) {
         setLoading(false);
@@ -585,61 +475,35 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
 
       {/* Search Controls */}
       <div className="bg-white rounded-xl p-5 mb-6 border border-blue-100">
-        {/* Search Mode Selector */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Search Mode
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setSearchMode('nationwide')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                searchMode === 'nationwide'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-              title="Search all markets that have revenue data"
-            >
-              <MapPin className="h-4 w-4" />
-              All Markets
-            </button>
-            <button
-              onClick={() => setSearchMode('cities')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                searchMode === 'cities'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-              title="Select from your configured cities"
-            >
-              <Building className="h-4 w-4" />
-              My Saved Cities
-            </button>
-            <button
-              onClick={() => setSearchMode('city_radius')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                searchMode === 'city_radius'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-              title="Search any city + surrounding area"
-            >
-              <Home className="h-4 w-4" />
-              Search by City
-            </button>
-            <button
-              onClick={() => setSearchMode('zip_code')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                searchMode === 'zip_code'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-              title="Search by specific zip codes"
-            >
-              <MapPin className="h-4 w-4" />
-              Search by Zip
-            </button>
-          </div>
+        {/* Search Mode Tabs */}
+        <div className="flex gap-1 mb-4 bg-gray-100 p-1 rounded-lg">
+          <button
+            onClick={() => setSearchMode('nationwide')}
+            className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+              searchMode === 'nationwide' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <Sparkles className="h-4 w-4" />
+            All Markets
+          </button>
+          <button
+            onClick={() => setSearchMode('cities')}
+            className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+              searchMode === 'cities' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <Building className="h-4 w-4" />
+            Select Cities
+          </button>
+          <button
+            onClick={() => setSearchMode('city_radius')}
+            className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+              searchMode === 'city_radius' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <MapPin className="h-4 w-4" />
+            City + Radius
+          </button>
         </div>
 
         {/* Mode-specific inputs */}
@@ -685,7 +549,12 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
             
             {/* City Selection Grid */}
             <div className="border border-gray-200 rounded-lg p-3 max-h-60 overflow-y-auto bg-white">
-              {cities.length > 0 ? (
+              {dataLoading ? (
+                <div className="text-center py-6">
+                  <Loader2 className="h-8 w-8 text-blue-400 mx-auto mb-2 animate-spin" />
+                  <p className="text-gray-600 font-medium">Loading markets...</p>
+                </div>
+              ) : cities.length > 0 ? (
                 <div className="space-y-1">
                   {cities.map(city => {
                     const cityStr = `${city.city}, ${city.state}`;
@@ -804,22 +673,6 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
           </div>
         )}
 
-        {searchMode === 'zip_code' && (
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Zip Codes (comma-separated)
-            </label>
-            <input
-              type="text"
-              value={zipCodes}
-              onChange={(e) => setZipCodes(e.target.value)}
-              placeholder="e.g., 78701, 78702, 78703"
-              className="input w-full"
-            />
-            <p className="text-xs text-gray-500 mt-1">Enter one or more zip codes separated by commas</p>
-          </div>
-        )}
-
         {/* Filters Row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
           <div>
@@ -872,7 +725,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
           <div className="flex items-end gap-2">
             <button
               onClick={handleSearch}
-              disabled={loading || (searchMode === 'cities' && selectedCities.length === 0) || (searchMode === 'city_radius' && !radiusCity.trim()) || (searchMode === 'zip_code' && !zipCodes.trim())}
+              disabled={loading || (searchMode === 'cities' && selectedCities.length === 0) || (searchMode === 'city_radius' && !radiusCity.trim())}
               className="btn btn-primary flex-1"
             >
               {loading ? (
@@ -883,7 +736,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
               ) : (
                 <>
                   <Search className="h-4 w-4" />
-                  Find Opportunities
+                  Find Deals
                 </>
               )}
             </button>
@@ -891,7 +744,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
               <button
                 onClick={cancelSearch}
                 className="btn bg-gray-200 hover:bg-gray-300 text-gray-700 px-3"
-                title="Cancel search"
+                title="Cancel"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -959,83 +812,8 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
             
             {/* AI Analysis */}
             {results.ai_analysis && (
-              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-4 border border-indigo-100">
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="h-4 w-4 text-indigo-600" />
-                  <span className="font-medium text-indigo-900">AI Quick Analysis</span>
-                </div>
-                <p className="text-gray-700 text-sm">{results.ai_analysis}</p>
-              </div>
-            )}
-            
-            {/* Events Summary Panel */}
-            {marketEvents && marketEvents.total_events > 0 && (
-              <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-lg p-4 border border-orange-200">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-5 w-5 text-orange-600" />
-                    <span className="font-semibold text-orange-900">
-                      Upcoming Events ({marketEvents.total_events} in {marketEvents.markets_affected} markets)
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="space-y-3">
-                  {/* Urgent Events */}
-                  {marketEvents.urgent.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-1 text-sm font-medium text-red-800 mb-1">
-                        <Zap className="h-3.5 w-3.5" />
-                        URGENT (&lt;3 months)
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {marketEvents.urgent.slice(0, 5).map((event, idx) => (
-                          <span 
-                            key={idx}
-                            className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"
-                            title={event.description}
-                          >
-                            {event.name} ({event.city})
-                            <span className="text-red-600">
-                              {event.days_until}d | {event.demand_multiplier}x
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* High Priority Events */}
-                  {marketEvents.high.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-1 text-sm font-medium text-orange-800 mb-1">
-                        <Clock className="h-3.5 w-3.5" />
-                        HIGH PRIORITY (3-6 months)
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {marketEvents.high.slice(0, 5).map((event, idx) => (
-                          <span 
-                            key={idx}
-                            className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium"
-                            title={event.description}
-                          >
-                            {event.name} ({event.city})
-                            <span className="text-orange-600">
-                              {event.days_until}d | {event.demand_multiplier}x
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Medium/Strategic Events (collapsed) */}
-                  {(marketEvents.medium.length > 0 || marketEvents.strategic.length > 0) && (
-                    <div className="text-xs text-gray-600">
-                      +{marketEvents.medium.length + marketEvents.strategic.length} more events 6-12+ months out
-                    </div>
-                  )}
-                </div>
+              <div className="bg-indigo-50 rounded-lg p-3 mt-3">
+                <p className="text-sm text-gray-700">{results.ai_analysis}</p>
               </div>
             )}
           </div>
@@ -1062,48 +840,11 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                     
                     {/* Address & Details */}
                     <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-semibold text-gray-900">{opp.address}</h4>
-                        {/* Event Impact Badge */}
-                        {(() => {
-                          const eventInfo = getCityEvents(opp.city, opp.state);
-                          if (!eventInfo) return null;
-                          
-                          const mostUrgent = eventInfo.mostUrgent;
-                          const urgencyColors = {
-                            urgent: 'bg-red-100 text-red-800 border-red-200',
-                            high: 'bg-orange-100 text-orange-800 border-orange-200',
-                            medium: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-                            strategic: 'bg-blue-100 text-blue-800 border-blue-200'
-                          };
-                          const color = urgencyColors[mostUrgent.urgency as keyof typeof urgencyColors] || urgencyColors.medium;
-                          
-                          return (
-                            <span 
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${color}`}
-                              title={`${mostUrgent.name} (${mostUrgent.demand_multiplier}x demand)`}
-                            >
-                              <Calendar className="h-3 w-3" />
-                              {mostUrgent.urgency === 'urgent' ? (
-                                <Zap className="h-3 w-3" />
-                              ) : null}
-                              {eventInfo.count} event{eventInfo.count > 1 ? 's' : ''}
-                            </span>
-                          );
-                        })()}
-                      </div>
-                      <div className="flex items-center gap-3 text-sm text-gray-600">
-                        <span className="flex items-center gap-1">
-                          <MapPin className="h-3.5 w-3.5" />
-                          {opp.city}, {opp.state}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Home className="h-3.5 w-3.5" />
-                          {opp.bedrooms} BR {opp.bathrooms ? `/ ${opp.bathrooms} BA` : ''}
-                        </span>
-                        {opp.sqft && (
-                          <span>{opp.sqft.toLocaleString()} sqft</span>
-                        )}
+                      <h4 className="font-semibold text-gray-900">{opp.address}</h4>
+                      <div className="flex items-center gap-3 text-sm text-gray-500">
+                        <span>{opp.city}, {opp.state}</span>
+                        <span>{opp.bedrooms} BR {opp.bathrooms ? `/ ${opp.bathrooms} BA` : ''}</span>
+                        {opp.sqft && <span>{opp.sqft.toLocaleString()} sqft</span>}
                       </div>
                     </div>
                   </div>
@@ -1307,8 +1048,25 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
       {/* Empty State - with data awareness */}
       {!results && !loading && (
         <div className="space-y-4">
-          {/* Warning if no data at all */}
-          {totalMarketsWithData === 0 && (
+          {/* Loading state */}
+          {dataLoading && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+              <div className="flex items-center gap-4">
+                <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
+                <div>
+                  <h3 className="text-lg font-semibold text-blue-800 mb-1">
+                    Loading Market Data...
+                  </h3>
+                  <p className="text-blue-700">
+                    Please wait while we fetch your saved markets and revenue data.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Warning if no data at all - only show when NOT loading */}
+          {!dataLoading && totalMarketsWithData === 0 && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
               <div className="flex items-start gap-4">
                 <div className="bg-yellow-100 p-3 rounded-lg">
@@ -1344,8 +1102,8 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
             </div>
           )}
           
-          {/* Ready state when data exists */}
-          {totalMarketsWithData > 0 && (
+          {/* Ready state when data exists - only show when NOT loading */}
+          {!dataLoading && totalMarketsWithData > 0 && (
             <div className="bg-white/50 rounded-xl p-8 text-center border border-dashed border-blue-200">
               <TrendingUp className="h-12 w-12 text-blue-300 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">

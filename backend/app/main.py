@@ -2219,16 +2219,19 @@ def get_airbtics_city_statuses(db: Session = Depends(get_db)):
     cutoff_date = datetime.utcnow() - timedelta(days=airbtics.REFRESH_INTERVAL_DAYS)
     
     for city in cities:
-        # Get Airbtics data for this city
-        airbtics_entries = db.query(AirDNAData).filter(
-            AirDNAData.city_id == city.id,
-            AirDNAData.source == 'airbtics'
+        # Get ALL revenue data for this city (both airbtics and manual)
+        all_revenue_entries = db.query(AirDNAData).filter(
+            AirDNAData.city_id == city.id
         ).all()
         
-        has_data = len(airbtics_entries) > 0
+        # Filter for airbtics-specific entries (for refresh logic)
+        airbtics_entries = [e for e in all_revenue_entries if e.source == 'airbtics']
+        
+        has_data = len(all_revenue_entries) > 0
         market_id = airbtics_entries[0].airbtics_market_id if airbtics_entries else None
         last_fetch = max((e.last_api_fetch for e in airbtics_entries if e.last_api_fetch), default=None)
-        needs_refresh = not has_data or (last_fetch and last_fetch < cutoff_date)
+        # Only needs refresh if we have airbtics data that's stale, or no data at all
+        needs_refresh = (len(airbtics_entries) > 0 and last_fetch and last_fetch < cutoff_date) or len(all_revenue_entries) == 0
         
         result.append(AirbticsCityStatus(
             city_id=city.id,
@@ -2238,7 +2241,7 @@ def get_airbtics_city_statuses(db: Session = Depends(get_db)):
             has_airbtics_data=has_data,
             market_id=market_id,
             last_fetch=last_fetch,
-            entries_count=len(airbtics_entries),
+            entries_count=len(all_revenue_entries),  # Count ALL revenue entries
             needs_refresh=needs_refresh
         ))
     
