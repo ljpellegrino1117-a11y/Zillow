@@ -3564,35 +3564,96 @@ TODAY'S DATE: {today_str}
 
 === YOUR ANALYSIS TASKS ===
 
-1. **DYNAMIC EVENT RESEARCH**: 
-   Based on your knowledge, identify ANY additional upcoming events in these cities that could affect STR demand:
-   - Major concerts, tours, or entertainment events
-   - Professional and college sports (playoffs, championships, bowl games)
-   - Business conferences and trade shows  
-   - Political events (debates, conventions)
-   - Cultural festivals and celebrations
-   - Economic developments (new Amazon HQ, tech expansions, etc.)
-   - Seasonal factors (spring break destinations, ski season, beach season)
+1. **COMPREHENSIVE DEMAND COMPRESSION RESEARCH**: 
+   For EACH city in the user's markets, actively research and identify ALL factors that create demand compression (supply/demand imbalance driving up prices):
 
-2. **EVENT-DRIVEN OPPORTUNITIES**:
-   For each market with upcoming events:
-   - Calculate potential revenue during the event period (use demand multiplier)
-   - Estimate how soon properties need to be acquired to capitalize
-   - Rate the opportunity: URGENT (<3 months), HIGH (3-6 months), MEDIUM (6-12 months)
+   **MAJOR EVENTS & ENTERTAINMENT:**
+   - Stadium concerts and tours (Taylor Swift, Beyoncé, major artists)
+   - Music festivals not in our database
+   - Comedy tours, Broadway shows, theatrical productions
+   - Award shows, film premieres, red carpet events
+   - Gaming tournaments, esports championships
 
-3. **ROI ANALYSIS**: For each promising market:
+   **SPORTS (beyond what's in our database):**
+   - NFL/NBA/MLB/NHL playoff runs for LOCAL teams (when teams are doing well)
+   - College football rivalry games, bowl games
+   - College basketball March Madness regionals
+   - Golf majors, tennis tournaments
+   - NASCAR, Formula 1, IndyCar races
+   - UFC/boxing championship fights
+   - Olympic trials, World Championships
+   - Marathon and running events (Boston, NYC, Chicago marathons)
+
+   **BUSINESS & PROFESSIONAL:**
+   - Industry conferences and trade shows
+   - Medical/scientific conferences (can be 50,000+ attendees)
+   - Tech summits and product launches
+   - Corporate relocations bringing workers (Tesla, Apple, etc.)
+   - Film and TV productions on location
+
+   **SEASONAL TOURISM PATTERNS:**
+   - Beach towns: When does peak season start/end?
+   - Ski resorts: Snow season timing
+   - Fall foliage destinations
+   - Cherry blossom season (DC, etc.)
+   - Holiday shopping weekends (Black Friday)
+   - Spring break patterns by region
+   - Summer vacation patterns
+
+   **ACADEMIC & EDUCATION:**
+   - College graduation weekends (HUGE for college towns)
+   - Move-in weekends for universities
+   - Parents weekends
+   - Homecoming weekends
+   - College sports seasons
+
+   **CULTURAL & RELIGIOUS:**
+   - Major religious holidays affecting travel
+   - Cultural festivals and parades
+   - Pride events and celebrations
+   - Food and wine festivals
+   - Art fairs and exhibitions
+
+   **ECONOMIC INDICATORS:**
+   - New company headquarters or expansions
+   - Factory openings bringing temporary workers
+   - Construction projects requiring housing
+   - Military base activities
+   - Government events and inaugurations
+
+   **WEATHER-DRIVEN:**
+   - "Snowbird" migration patterns (FL, AZ, TX in winter)
+   - Summer exodus from hot climates
+   - Hurricane season effects (evacuation destinations)
+   - Eclipse paths and astronomical events
+
+2. **DEMAND MULTIPLIER ANALYSIS**:
+   For each identified event/factor, estimate:
+   - Expected demand increase (1.5x to 5x normal)
+   - Duration of impact (days, weeks, or seasonal)
+   - Geographic reach (just the city or surrounding areas)
+   - How far in advance bookings spike
+
+3. **TIMING & URGENCY**:
+   - Rate each opportunity: URGENT (<3 months), HIGH (3-6 months), MEDIUM (6-12 months), STRATEGIC (>1 year)
+   - Identify "investment windows" - when properties need to be acquired to capitalize
+   - Note recurring annual patterns vs one-time events
+
+4. **ROI ANALYSIS**: For each promising market:
    - Estimated annual revenue potential (from data provided)
-   - Expected profit margins for arbitrage (revenue minus typical rent costs)
+   - Expected profit margins for arbitrage
    - Time to break even
-   - Risk factors
+   - Risk factors and seasonality considerations
 
-4. **ACTIONABLE RECOMMENDATIONS**:
+5. **ACTIONABLE RECOMMENDATIONS**:
    - Top 3-5 markets to prioritize RIGHT NOW and WHY
    - Specific bedroom counts that show best margins
+   - Markets with multiple demand drivers (more stable income)
    - Markets to avoid and why
-   - Time-sensitive opportunities that need immediate action
+   - Hidden gem opportunities others might miss
 
 Format your response as a clear, actionable investment briefing with the following sections:
+- **DISCOVERED EVENTS** (events you found beyond our database)
 - **URGENT OPPORTUNITIES** (events < 3 months away)
 - **HIGH PRIORITY** (events 3-6 months away)  
 - **STRATEGIC PLAYS** (longer-term opportunities)
@@ -3607,22 +3668,43 @@ Be specific with numbers, dates, and reasoning. Keep the response comprehensive 
             messages=[
                 {
                     "role": "system",
-                    "content": """You are an expert real estate investment analyst specializing in short-term rental (STR) arbitrage.
+                    "content": """You are an expert real estate investment analyst and market researcher specializing in short-term rental (STR) arbitrage.
 
-Your expertise includes:
-- Deep knowledge of major events that drive STR demand (sports, conferences, festivals)
-- Understanding of STR market dynamics and seasonality
-- ROI and profitability analysis for rental arbitrage
-- Risk assessment for real estate investments
+Your core mission is to ACTIVELY RESEARCH and identify demand compression events - situations where demand exceeds supply, driving up rental prices. You have comprehensive knowledge of:
 
-Provide clear, data-driven advice focused on ROI and actionable insights. Be direct and specific with recommendations. Always consider timing and urgency in your analysis."""
+EVENTS & ENTERTAINMENT:
+- Major concert tours and their schedules (Taylor Swift, Beyoncé, etc.)
+- Music festivals, sporting events, conferences across all US cities
+- Award shows, film festivals, theatrical productions
+- Gaming tournaments and esports events
+
+SPORTS KNOWLEDGE:
+- NFL, NBA, MLB, NHL schedules and playoff implications
+- College football and basketball - rivalries, bowl games, March Madness
+- Golf majors, tennis Grand Slams, NASCAR, F1
+- UFC/boxing events, marathons, Olympics
+
+BUSINESS & PROFESSIONAL:
+- Major industry conferences (CES, SXSW, medical conferences, etc.)
+- Corporate relocations and tech hub developments
+- Film/TV production locations
+
+SEASONAL & TOURISM:
+- Beach season timing by region
+- Ski season patterns
+- College graduation and move-in weekends
+- Spring break destinations and timing
+- Snowbird migration patterns
+- Holiday travel patterns
+
+Your analysis should be SPECIFIC with dates, expected demand multipliers, and concrete recommendations. Don't just list generic advice - provide actionable intelligence about SPECIFIC events affecting the user's markets. Research thoroughly and report what you discover."""
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            max_tokens=2000,
+            max_tokens=3000,  # More space for comprehensive event research
             temperature=0.7,
         )
         
