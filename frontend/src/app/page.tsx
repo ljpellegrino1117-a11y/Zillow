@@ -1,103 +1,369 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Home, ChevronDown, ChevronUp, Settings, RefreshCw } from 'lucide-react';
-import CityManager from '@/components/CityManager';
-import AirDNAInput from '@/components/AirDNAInput';
-import DashboardSummary from '@/components/DashboardSummary';
-import OpportunityFinder from '@/components/OpportunityFinder';
-import DataStatusBar from '@/components/DataStatusBar';
-import MarketsOverview from '@/components/MarketsOverview';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { 
+  Search, 
+  MapPin, 
+  BarChart3, 
+  DollarSign, 
+  Zap, 
+  Settings,
+  ChevronDown,
+  Loader2,
+  Home,
+  Bug,
+  Database
+} from 'lucide-react';
+import Link from 'next/link';
 import { useData } from '@/context/DataContext';
+import AIAdvisor from '@/components/AIAdvisor';
+import DataAvailability from '@/components/DataAvailability';
+import SearchResults from '@/components/SearchResults';
+import { LocationsFilter, STRCompsFilter, ProfitFilter } from '@/components/filters';
+import type { LocationFilters, STRCompsFilters, ProfitFilters } from '@/components/filters';
+import { findOpportunities, OpportunitySearchResponse } from '@/lib/api';
+
+// Default filter values
+const defaultLocationFilters: LocationFilters = {
+  mode: 'all',
+  selectedCities: [],
+  radiusCity: '',
+  radiusMiles: 25,
+  excludeTargetCity: false
+};
+
+const defaultSTRFilters: STRCompsFilters = {
+  minBedrooms: 3,
+  maxBedrooms: 8,
+  amenities: {
+    pool: false,
+    waterfront: false,
+    garage: false,
+    yard: false,
+    petFriendly: false,
+    hotTub: false
+  },
+  confidence: 'any'
+};
+
+const defaultProfitFilters: ProfitFilters = {
+  minProfit: 0,
+  minRent: 0,
+  maxRent: 50000,
+  minROI: 0,
+  maxBreakEven: 100
+};
+
+type DropdownType = 'locations' | 'comps' | 'profit' | null;
 
 export default function Dashboard() {
-  const [showDataManagement, setShowDataManagement] = useState(false);
-  const { refreshAll, isLoading } = useData();
-  const dataManagementRef = useRef<HTMLDivElement>(null);
+  // Filter states
+  const [locationFilters, setLocationFilters] = useState<LocationFilters>(defaultLocationFilters);
+  const [strFilters, setSTRFilters] = useState<STRCompsFilters>(defaultSTRFilters);
+  const [profitFilters, setProfitFilters] = useState<ProfitFilters>(defaultProfitFilters);
+  
+  // UI states
+  const [activeDropdown, setActiveDropdown] = useState<DropdownType>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [results, setResults] = useState<OpportunitySearchResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showNavMenu, setShowNavMenu] = useState(false);
+  const navRef = useRef<HTMLDivElement>(null);
 
-  const handleDataChange = () => {
-    refreshAll();
+  const { cityStatuses, refreshAll } = useData();
+  const citiesWithData = cityStatuses.filter(c => c.has_airbtics_data);
+
+  // Close nav menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(event.target as Node)) {
+        setShowNavMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Check if filters have been modified
+  const hasLocationFilters = locationFilters.mode !== 'all' || 
+    locationFilters.selectedCities.length > 0 ||
+    locationFilters.radiusCity !== '';
+  
+  const hasSTRFilters = strFilters.minBedrooms !== 3 || 
+    strFilters.maxBedrooms !== 8 ||
+    Object.values(strFilters.amenities).some(v => v);
+  
+  const hasProfitFilters = profitFilters.minProfit > 0 || 
+    profitFilters.minROI > 0 ||
+    profitFilters.maxBreakEven < 100;
+
+  const toggleDropdown = (type: DropdownType) => {
+    setActiveDropdown(activeDropdown === type ? null : type);
   };
 
-  const handleSyncClick = () => {
-    setShowDataManagement(true);
-    setTimeout(() => {
-      dataManagementRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 100);
+  const handleSearch = useCallback(async (isRapid = false) => {
+    setIsSearching(true);
+    setError(null);
+    setActiveDropdown(null);
+
+    try {
+      // Build search request
+      const request: any = {
+        min_bedrooms: strFilters.minBedrooms,
+        max_bedrooms: strFilters.maxBedrooms,
+        min_profit: profitFilters.minProfit,
+        max_results: 50
+      };
+
+      // Handle location mode
+      if (isRapid || locationFilters.mode === 'all') {
+        request.search_mode = 'nationwide';
+      } else if (locationFilters.mode === 'select') {
+        request.search_mode = 'cities';
+        request.cities = locationFilters.selectedCities;
+      } else if (locationFilters.mode === 'radius') {
+        request.search_mode = 'city_radius';
+        request.city = locationFilters.radiusCity;
+        request.radius_miles = locationFilters.radiusMiles;
+        request.include_center_city = !locationFilters.excludeTargetCity;
+      }
+
+      // Add amenity filters
+      const amenities: string[] = [];
+      if (strFilters.amenities.pool) amenities.push('pool');
+      if (strFilters.amenities.waterfront) amenities.push('waterfront');
+      if (strFilters.amenities.garage) amenities.push('garage');
+      if (strFilters.amenities.yard) amenities.push('yard');
+      if (amenities.length > 0) {
+        request.amenities = amenities;
+      }
+
+      const response = await findOpportunities(request);
+      setResults(response);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Search failed. Please try again.');
+      console.error('Search error:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [locationFilters, strFilters, profitFilters]);
+
+  const handleManageData = () => {
+    window.location.href = '/manage';
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Compact Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-14">
-            <div className="flex items-center gap-2">
-              <div className="bg-blue-600 p-1.5 rounded-lg">
-                <Home className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold text-gray-900">Zillow Arbitrage</h1>
-              </div>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Navigation Dropdown - Top Left */}
+      <div className="absolute top-4 left-4 z-20" ref={navRef}>
+        <button
+          onClick={() => setShowNavMenu(!showNavMenu)}
+          className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-white rounded-lg transition-colors"
+        >
+          <Home className="w-5 h-5" />
+          <span className="text-sm font-medium">Search</span>
+          <ChevronDown className={`w-4 h-4 transition-transform ${showNavMenu ? 'rotate-180' : ''}`} />
+        </button>
+
+        {showNavMenu && (
+          <div className="absolute top-full left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1">
+            <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              Views
             </div>
-            <button
-              onClick={() => refreshAll()}
-              disabled={isLoading}
-              className="text-gray-500 hover:text-gray-700 p-2 rounded-lg hover:bg-gray-100 transition-colors"
-              title="Refresh all data"
+            <Link
+              href="/"
+              className="flex items-center gap-3 px-3 py-2 text-gray-900 bg-blue-50 border-l-2 border-blue-500"
             >
-              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
+              <Home className="w-4 h-4 text-blue-600" />
+              <div>
+                <span className="text-sm font-medium">Search</span>
+                <p className="text-xs text-gray-500">Find opportunities</p>
+              </div>
+            </Link>
+            <Link
+              href="/advanced"
+              className="flex items-center gap-3 px-3 py-2 text-gray-700 hover:bg-gray-50 border-l-2 border-transparent"
+            >
+              <Bug className="w-4 h-4 text-amber-500" />
+              <div>
+                <span className="text-sm font-medium">Advanced / Debug</span>
+                <p className="text-xs text-gray-500">Detailed controls & testing</p>
+              </div>
+            </Link>
+            <Link
+              href="/manage"
+              className="flex items-center gap-3 px-3 py-2 text-gray-700 hover:bg-gray-50 border-l-2 border-transparent"
+            >
+              <Database className="w-4 h-4 text-green-500" />
+              <div>
+                <span className="text-sm font-medium">Data Management</span>
+                <p className="text-xs text-gray-500">Markets & revenue data</p>
+              </div>
+            </Link>
           </div>
-        </div>
-      </header>
+        )}
+      </div>
+
+      {/* Settings Icon - Top Right */}
+      <div className="absolute top-4 right-4 z-10">
+        <button 
+          onClick={handleManageData}
+          className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white rounded-lg transition-colors"
+          title="Manage data"
+        >
+          <Settings className="w-5 h-5" />
+        </button>
+      </div>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        
-        {/* Data Status - Compact */}
-        <DataStatusBar onSyncClick={handleSyncClick} />
-
-        {/* Opportunity Finder - Main Feature */}
-        <div className="mb-4">
-          <OpportunityFinder />
+      <main className="flex-1 flex flex-col items-center pt-16 px-4">
+        {/* Logo */}
+        <div className="mb-8 text-center">
+          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">
+            <span className="text-blue-600">Zillow</span> Arbitrage
+          </h1>
+          <p className="text-gray-500 mt-2">Find profitable rental arbitrage deals</p>
         </div>
 
-        {/* Data Management - Collapsible */}
-        <div ref={dataManagementRef}>
+        {/* Search Bar */}
+        <div className="w-full max-w-2xl mb-4">
+          <div className="flex items-center bg-white border border-gray-300 rounded-full px-5 py-3 shadow-sm hover:shadow-md focus-within:shadow-md transition-shadow">
+            <Search className="w-5 h-5 text-gray-400 mr-3" />
+            <input
+              type="text"
+              placeholder="Search for rental arbitrage opportunities..."
+              className="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400"
+              onFocus={() => setActiveDropdown(null)}
+            />
+          </div>
+        </div>
+
+        {/* Filter Buttons */}
+        <div className="flex items-center gap-2 mb-4 relative">
+          {/* Locations Filter */}
+          <div className="relative">
+            <button
+              onClick={() => toggleDropdown('locations')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all ${
+                activeDropdown === 'locations'
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : hasLocationFilters
+                  ? 'bg-blue-50 border-blue-200 text-blue-700'
+                  : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <MapPin className="w-4 h-4" />
+              <span className="text-sm font-medium">Locations</span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${activeDropdown === 'locations' ? 'rotate-180' : ''}`} />
+            </button>
+            <LocationsFilter
+              isOpen={activeDropdown === 'locations'}
+              onClose={() => setActiveDropdown(null)}
+              filters={locationFilters}
+              onApply={setLocationFilters}
+            />
+          </div>
+
+          {/* STR Comps Filter */}
+          <div className="relative">
+            <button
+              onClick={() => toggleDropdown('comps')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all ${
+                activeDropdown === 'comps'
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : hasSTRFilters
+                  ? 'bg-blue-50 border-blue-200 text-blue-700'
+                  : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span className="text-sm font-medium">STR Comps</span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${activeDropdown === 'comps' ? 'rotate-180' : ''}`} />
+            </button>
+            <STRCompsFilter
+              isOpen={activeDropdown === 'comps'}
+              onClose={() => setActiveDropdown(null)}
+              filters={strFilters}
+              onApply={setSTRFilters}
+            />
+          </div>
+
+          {/* Profit Filter */}
+          <div className="relative">
+            <button
+              onClick={() => toggleDropdown('profit')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all ${
+                activeDropdown === 'profit'
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : hasProfitFilters
+                  ? 'bg-blue-50 border-blue-200 text-blue-700'
+                  : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <DollarSign className="w-4 h-4" />
+              <span className="text-sm font-medium">Profit</span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${activeDropdown === 'profit' ? 'rotate-180' : ''}`} />
+            </button>
+            <ProfitFilter
+              isOpen={activeDropdown === 'profit'}
+              onClose={() => setActiveDropdown(null)}
+              filters={profitFilters}
+              onApply={setProfitFilters}
+            />
+          </div>
+        </div>
+
+        {/* Search Buttons */}
+        <div className="flex items-center gap-3 mb-6">
           <button
-            onClick={() => setShowDataManagement(!showDataManagement)}
-            className="w-full flex items-center justify-between px-4 py-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            onClick={() => handleSearch(true)}
+            disabled={isSearching || citiesWithData.length === 0}
+            className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full font-medium shadow-md hover:shadow-lg hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <div className="flex items-center gap-2">
-              <Settings className="w-4 h-4 text-gray-500" />
-              <span className="font-medium text-gray-700">Data Management</span>
-              <span className="text-sm text-gray-400">(Markets & Revenue Data)</span>
-            </div>
-            {showDataManagement ? (
-              <ChevronUp className="w-5 h-5 text-gray-400" />
+            {isSearching ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
-              <ChevronDown className="w-5 h-5 text-gray-400" />
+              <Zap className="w-4 h-4" />
             )}
+            Rapid Search
           </button>
-          
-          {showDataManagement && (
-            <div className="mt-4 space-y-4">
-              <DashboardSummary refreshTrigger={0} />
-              <MarketsOverview refreshTrigger={0} onDataChange={handleDataChange} />
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <CityManager onCityChange={handleDataChange} />
-                <AirDNAInput onDataSaved={handleDataChange} refreshTrigger={0} />
-              </div>
-            </div>
-          )}
+          <button
+            onClick={() => handleSearch(false)}
+            disabled={isSearching || citiesWithData.length === 0}
+            className="flex items-center gap-2 px-6 py-2.5 bg-white text-gray-700 border border-gray-300 rounded-full font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSearching ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Search className="w-4 h-4" />
+            )}
+            Search
+          </button>
         </div>
+
+        {/* AI Advisor */}
+        <AIAdvisor searchResults={results} isSearching={isSearching} />
+
+        {/* Error Display */}
+        {error && (
+          <div className="w-full max-w-2xl mt-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* Results */}
+        <SearchResults results={results} isLoading={isSearching} />
       </main>
 
-      {/* Minimal Footer */}
-      <footer className="mt-auto py-3 text-center text-xs text-gray-400">
-        Rental Arbitrage Finder
-      </footer>
+      {/* Data Availability Footer */}
+      <DataAvailability
+        onAddMarket={() => window.location.href = '/manage'}
+        onFetchListings={() => {
+          // Could trigger batch scrape here
+          window.location.href = '/manage';
+        }}
+        onManageData={() => window.location.href = '/manage'}
+      />
     </div>
   );
 }
