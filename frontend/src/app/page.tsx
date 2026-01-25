@@ -1,24 +1,19 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { BarChart3, Home, Trash2, ChevronDown, ChevronUp, Settings, Database } from 'lucide-react';
+import { Home, Trash2, ChevronDown, ChevronUp, Settings } from 'lucide-react';
 import CityManager from '@/components/CityManager';
 import AirDNAInput from '@/components/AirDNAInput';
-import DiscrepancyTable from '@/components/DiscrepancyTable';
-import ListingsTable from '@/components/ListingsTable';
 import DashboardSummary from '@/components/DashboardSummary';
-import AIInvestmentSuggestions from '@/components/AIInvestmentSuggestions';
 import OpportunityFinder from '@/components/OpportunityFinder';
 import DataStatusBar from '@/components/DataStatusBar';
 import MarketsOverview from '@/components/MarketsOverview';
-import { getCities, deleteCity, getAirDNAData, deleteAirDNAData } from '@/lib/api';
+import { getCities, deleteCity } from '@/lib/api';
 
 export default function Dashboard() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [activeTab, setActiveTab] = useState<'analysis' | 'listings'>('analysis');
   const [clearing, setClearing] = useState(false);
   const [showDataManagement, setShowDataManagement] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   
   // Ref for scrolling to data management
   const dataManagementRef = useRef<HTMLDivElement>(null);
@@ -136,58 +131,6 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Level 4: Advanced Analysis - Collapsible */}
-        <div className="mb-6">
-          <button
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="w-full flex items-center justify-between px-4 py-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-gray-500" />
-              <span className="font-medium text-gray-700">Advanced Analysis</span>
-              <span className="text-sm text-gray-500">
-                (Detailed tables & AI insights)
-              </span>
-            </div>
-            {showAdvanced ? (
-              <ChevronUp className="w-5 h-5 text-gray-400" />
-            ) : (
-              <ChevronDown className="w-5 h-5 text-gray-400" />
-            )}
-          </button>
-          
-          {showAdvanced && (
-            <div className="mt-4 space-y-6">
-              {/* Tab Navigation */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setActiveTab('analysis')}
-                  className={`btn ${activeTab === 'analysis' ? 'btn-primary' : 'btn-secondary'}`}
-                >
-                  <BarChart3 className="h-4 w-4" />
-                  Arbitrage Analysis
-                </button>
-                <button
-                  onClick={() => setActiveTab('listings')}
-                  className={`btn ${activeTab === 'listings' ? 'btn-primary' : 'btn-secondary'}`}
-                >
-                  <Home className="h-4 w-4" />
-                  Listings
-                </button>
-              </div>
-
-              {/* Tab Content */}
-              {activeTab === 'analysis' ? (
-                <DiscrepancyTable refreshTrigger={refreshTrigger} />
-              ) : (
-                <ListingsTable refreshTrigger={refreshTrigger} />
-              )}
-
-              {/* AI Investment Advisor */}
-              <AIInvestmentSuggestions refreshTrigger={refreshTrigger} />
-            </div>
-          )}
-        </div>
       </main>
 
       {/* Footer */}
