@@ -2766,14 +2766,25 @@ async def find_opportunities(
                     revenue_by_bedroom[br] = rd
                     revenue_sources[rd.source or "manual"] = revenue_sources.get(rd.source or "manual", 0) + 1
         
-        # Get ALL listings from database that match our criteria (FAST - single query)
-        all_db_listings = db.query(ZillowListing).filter(
+        # Get ALL rental listings from database that match our criteria (FAST - single query)
+        rental_query = db.query(ZillowListing).filter(
             ZillowListing.bedrooms >= request.min_bedrooms,
             ZillowListing.bedrooms <= request.max_bedrooms,
             ZillowListing.status == 'active',
+            ZillowListing.listing_type == 'rental',
             ZillowListing.price > 100,  # Filter out bad data ($1/mo rent)
             ZillowListing.price < 50000  # Filter out obvious errors
-        ).all()
+        )
+        
+        # Apply basement filter if specified
+        if request.basement_filter == 'include':
+            rental_query = rental_query.filter(ZillowListing.has_unfinished_basement == True)
+        elif request.basement_filter == 'exclude':
+            rental_query = rental_query.filter(
+                (ZillowListing.has_unfinished_basement == False) | (ZillowListing.has_unfinished_basement == None)
+            )
+        
+        all_db_listings = rental_query.all()
         
         # Convert to dict format
         all_listings = [{
@@ -2797,7 +2808,64 @@ async def find_opportunities(
             "has_waterfront": l.has_waterfront,
             "has_garage": l.has_garage,
             "has_yard": l.has_yard,
+            "has_basement": l.has_basement,
+            "has_unfinished_basement": l.has_unfinished_basement,
+            "listing_type": "rental",
         } for l in all_db_listings]
+        
+        # Also get for-sale listings if requested
+        if request.include_for_sale:
+            from . import rent_estimator
+            
+            forsale_query = db.query(ZillowListing).filter(
+                ZillowListing.bedrooms >= request.min_bedrooms,
+                ZillowListing.bedrooms <= request.max_bedrooms,
+                ZillowListing.status == 'active',
+                ZillowListing.listing_type == 'for_sale',
+                ZillowListing.sale_price > 50000,  # Filter out bad data
+            )
+            
+            # Apply basement filter if specified
+            if request.basement_filter == 'include':
+                forsale_query = forsale_query.filter(ZillowListing.has_unfinished_basement == True)
+            elif request.basement_filter == 'exclude':
+                forsale_query = forsale_query.filter(
+                    (ZillowListing.has_unfinished_basement == False) | (ZillowListing.has_unfinished_basement == None)
+                )
+            
+            forsale_listings = forsale_query.all()
+            
+            for l in forsale_listings:
+                # Estimate rent for for-sale listings
+                est_rent, est_method = rent_estimator.estimate_rent(l, db)
+                
+                all_listings.append({
+                    "listing_id": l.id,
+                    "address": l.address,
+                    "city": l.city or "",
+                    "state": l.state or "",
+                    "zip_code": l.zip_code,
+                    "bedrooms": l.bedrooms,
+                    "bathrooms": l.bathrooms,
+                    "price": est_rent,  # Use estimated rent as "price"
+                    "sale_price": l.sale_price,
+                    "sqft": l.sqft,
+                    "url": l.url,
+                    "photos": json.loads(l.photos) if l.photos else [],
+                    "agent_name": l.agent_name,
+                    "agent_phone": l.agent_phone,
+                    "agent_email": l.agent_email,
+                    "agent_company": l.agent_company,
+                    "listing_source": l.listing_source or "zillow",
+                    "has_pool": l.has_pool,
+                    "has_waterfront": l.has_waterfront,
+                    "has_garage": l.has_garage,
+                    "has_yard": l.has_yard,
+                    "has_basement": l.has_basement,
+                    "has_unfinished_basement": l.has_unfinished_basement,
+                    "listing_type": "for_sale",
+                    "rent_estimation_method": est_method,
+                })
         
         logger.info(f"Analyzing {len(all_listings)} listings from database for radius search")
         
@@ -3812,6 +3880,109 @@ Your analysis should be SPECIFIC with dates, expected demand multipliers, and co
     except Exception as e:
         logger.error(f"OpenAI API error in investment suggestions: {str(e)}")
         raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
+
+
+# ==================== AI Advisor Q&A ====================
+
+from pydantic import BaseModel as PydanticBaseModel
+
+class AIQuestionRequest(PydanticBaseModel):
+    question: str
+    context: Optional[Dict[str, Any]] = None
+
+class AIQuestionResponse(PydanticBaseModel):
+    answer: str
+    source: str  # "rule_based" or "openai"
+    suggestions: List[str] = []
+    data: Optional[Dict[str, Any]] = None
+
+@app.post("/api/ai/ask", response_model=AIQuestionResponse)
+async def ask_ai_advisor(request: AIQuestionRequest, db: Session = Depends(get_db)):
+    """
+    Ask the AI Advisor a question about markets, properties, or arbitrage strategies.
+    
+    Uses rule-based responses by default. Falls back to OpenAI if:
+    - OPENAI_API_KEY is configured
+    - The rule-based engine doesn't have a specific answer
+    """
+    from .ai_advisor import RuleBasedAdvisor
+    
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+    
+    # Try rule-based response first
+    advisor = RuleBasedAdvisor(db)
+    result = advisor.answer(question, request.context)
+    
+    # If we got a meaningful answer from rules, return it
+    if result.get("answer") and "I can help you with questions" not in result["answer"]:
+        return AIQuestionResponse(
+            answer=result["answer"],
+            source="rule_based",
+            suggestions=result.get("suggestions", []),
+            data=result.get("data")
+        )
+    
+    # Check if OpenAI is available for fallback
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if openai_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=openai_key)
+            
+            # Build context about available data
+            cities = db.query(City).all()
+            city_list = ", ".join([f"{c.city}, {c.state}" for c in cities[:10]])
+            
+            total_listings = db.query(func.count(ZillowListing.id)).filter(
+                ZillowListing.status == 'active'
+            ).scalar() or 0
+            
+            revenue_data = db.query(
+                City.city,
+                func.avg(AirDNAData.annual_revenue).label('avg')
+            ).join(AirDNAData, City.id == AirDNAData.city_id)\
+            .group_by(City.id).all()
+            
+            revenue_summary = "; ".join([f"{r.city}: ${r.avg:,.0f}/yr avg" for r in revenue_data[:5]])
+            
+            system_prompt = f"""You are an AI advisor for rental arbitrage investment. You help users find profitable short-term rental opportunities.
+
+Available data in the system:
+- Markets tracked: {city_list}
+- Total active listings: {total_listings}
+- Revenue data: {revenue_summary}
+
+Provide concise, actionable advice. If asked about specific data you don't have, suggest what the user should do (e.g., "Add revenue data for that market" or "Fetch listings first")."""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": question}
+                ],
+                max_tokens=500,
+                temperature=0.7
+            )
+            
+            return AIQuestionResponse(
+                answer=response.choices[0].message.content,
+                source="openai",
+                suggestions=["Try asking about specific markets", "Compare cities", "Ask about profit potential"]
+            )
+            
+        except Exception as e:
+            logger.warning(f"OpenAI fallback failed: {e}")
+            # Fall through to rule-based response
+    
+    # Return the rule-based response (even if generic)
+    return AIQuestionResponse(
+        answer=result["answer"],
+        source="rule_based",
+        suggestions=result.get("suggestions", []),
+        data=result.get("data")
+    )
 
 
 # ==================== Database Status & Data Migration ====================

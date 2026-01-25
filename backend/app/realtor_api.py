@@ -545,3 +545,270 @@ async def test_connection() -> Dict[str, Any]:
             "message": str(e),
             "configured": True
         }
+
+
+# ==================== FOR-SALE LISTINGS ====================
+
+async def search_for_sale(
+    city: str,
+    state_code: str,
+    min_beds: int = 3,
+    max_beds: int = 8,
+    min_price: int = None,
+    max_price: int = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """
+    Search for for-sale listings in a city.
+    
+    Args:
+        city: City name (e.g., "Austin")
+        state_code: State code (e.g., "TX")
+        min_beds: Minimum bedrooms
+        max_beds: Maximum bedrooms
+        min_price: Minimum sale price (optional)
+        max_price: Maximum sale price (optional)
+        limit: Max results per request (max 200)
+        offset: Pagination offset
+    
+    Returns:
+        Dict with 'listings' and 'total_count'
+    """
+    if not RAPIDAPI_KEY:
+        logger.warning("RAPIDAPI_KEY not configured - returning empty results")
+        return {"listings": [], "total_count": 0, "error": "API key not configured"}
+    
+    url = f"{BASE_URL}/properties/v3/list"
+    
+    # Build payload for for-sale listings
+    payload = {
+        "limit": limit,
+        "offset": offset,
+        "city": city,
+        "state_code": state_code.upper(),
+        "status": ["for_sale"],
+        "type": ["single_family", "condos", "townhomes", "duplex_triplex", "multi_family"],
+        "beds_min": min_beds,
+        "beds_max": max_beds,
+        "sort": {"direction": "desc", "field": "list_date"}
+    }
+    
+    # Add price filters if specified
+    if min_price:
+        payload["list_price_min"] = min_price
+    if max_price:
+        payload["list_price_max"] = max_price
+    
+    headers = get_headers()
+    headers["Content-Type"] = "application/json"
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    url,
+                    headers=headers,
+                    json=payload
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    results = data.get("data", {}).get("home_search", {}).get("results", [])
+                    total = data.get("data", {}).get("home_search", {}).get("total", 0)
+                    if not total:
+                        total = data.get("data", {}).get("home_search", {}).get("count", len(results))
+                    
+                    listings = []
+                    for result in results:
+                        listing = parse_for_sale_listing(result)
+                        if listing:
+                            listings.append(listing)
+                    
+                    logger.info(f"Found {len(listings)} for-sale properties in {city}, {state_code}")
+                    return {
+                        "listings": listings,
+                        "total_count": total,
+                        "offset": offset
+                    }
+                
+                elif response.status_code == 429:
+                    wait_time = (attempt + 1) * 2
+                    logger.warning(f"Rate limited, waiting {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                elif response.status_code in [401, 403]:
+                    logger.error(f"Authentication error: {response.status_code}")
+                    return {"listings": [], "total_count": 0, "error": "Authentication failed"}
+                
+                else:
+                    logger.error(f"API error {response.status_code}: {response.text[:200]}")
+                    
+        except httpx.TimeoutException:
+            logger.warning(f"Timeout on attempt {attempt + 1}")
+            await asyncio.sleep(API_RATE_LIMIT_DELAY)
+        except Exception as e:
+            logger.error(f"Request error: {str(e)}")
+            await asyncio.sleep(API_RATE_LIMIT_DELAY)
+    
+    return {"listings": [], "total_count": 0, "error": "Max retries exceeded"}
+
+
+def parse_for_sale_listing(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Parse a single for-sale listing from the API response.
+    Similar to parse_listing but marks it as for_sale type.
+    """
+    try:
+        location = data.get("location", {})
+        address = location.get("address", {})
+        description = data.get("description", {})
+        
+        # Extract photos
+        photos = []
+        primary_photo = data.get("primary_photo", {})
+        if primary_photo and primary_photo.get("href"):
+            photos.append(primary_photo.get("href"))
+        
+        # Basic listing info - sale_price is list_price for for-sale
+        listing = {
+            "property_id": data.get("property_id"),
+            "listing_id": data.get("listing_id"),
+            "address": address.get("line", ""),
+            "city": address.get("city", ""),
+            "state": address.get("state_code", ""),
+            "zip_code": address.get("postal_code", ""),
+            "bedrooms": description.get("beds") or 0,
+            "bathrooms": description.get("baths") or 0,
+            "sqft": description.get("sqft"),
+            "sale_price": data.get("list_price"),  # This is the sale price
+            "price": None,  # Monthly rent - will be estimated
+            "property_type": description.get("type", ""),
+            "year_built": description.get("year_built"),
+            "lot_sqft": description.get("lot_sqft"),
+            "url": data.get("href"),
+            "photos": photos,
+            "list_date": data.get("list_date"),
+            "listing_type": "for_sale",  # Mark as for-sale
+        }
+        
+        # Agent info
+        advertisers = data.get("advertisers", [])
+        if advertisers:
+            agent = advertisers[0]
+            listing["agent_name"] = agent.get("name")
+            listing["agent_email"] = agent.get("email")
+            listing["agent_company"] = agent.get("office", {}).get("name") if agent.get("office") else None
+            phones = agent.get("phones", [])
+            if phones:
+                listing["agent_phone"] = phones[0].get("number")
+            else:
+                listing["agent_phone"] = None
+        else:
+            listing["agent_name"] = None
+            listing["agent_email"] = None
+            listing["agent_company"] = None
+            listing["agent_phone"] = None
+        
+        # Branding info as fallback
+        branding = data.get("branding", [])
+        if branding and not listing.get("agent_company"):
+            listing["agent_company"] = branding[0].get("name")
+        
+        # Features/Amenities
+        features = data.get("tags", []) or []
+        listing["features"] = features
+        
+        features_lower = [f.lower() for f in features if f]
+        listing["has_pool"] = any("pool" in f for f in features_lower)
+        listing["has_garage"] = any("garage" in f for f in features_lower)
+        listing["has_waterfront"] = any(
+            w in f for f in features_lower 
+            for w in ["waterfront", "water view", "lake", "ocean", "beach"]
+        )
+        listing["has_basement"] = any("basement" in f for f in features_lower)
+        listing["has_unfinished_basement"] = any(
+            w in f for f in features_lower 
+            for w in ["unfinished basement", "unfinished bsmt"]
+        )
+        listing["has_ac"] = any(
+            w in f for f in features_lower 
+            for w in ["air conditioning", "central air", "a/c"]
+        )
+        listing["has_fireplace"] = any("fireplace" in f for f in features_lower)
+        listing["has_yard"] = any(
+            w in f for f in features_lower 
+            for w in ["yard", "backyard", "fenced"]
+        )
+        
+        # Price estimate info (will be populated by rent_estimator)
+        estimate = data.get("estimate", {})
+        if estimate:
+            listing["zestimate"] = estimate.get("estimate")
+            listing["zestimate_rent"] = None  # Would need separate API call
+        
+        # Validate required fields
+        if not listing["address"] or not listing["sale_price"]:
+            return None
+        
+        return listing
+        
+    except Exception as e:
+        logger.error(f"Error parsing for-sale listing: {str(e)}")
+        return None
+
+
+async def search_all_for_sale(
+    city: str,
+    state_code: str,
+    min_beds: int = 3,
+    max_beds: int = 8,
+    min_price: int = None,
+    max_price: int = None,
+    max_listings: int = 500
+) -> List[Dict[str, Any]]:
+    """
+    Search all for-sale listings in a city, handling pagination.
+    
+    Args:
+        city: City name
+        state_code: State code
+        min_beds: Minimum bedrooms
+        max_beds: Maximum bedrooms
+        min_price: Minimum sale price
+        max_price: Maximum sale price
+        max_listings: Maximum total listings to fetch
+    
+    Returns:
+        List of all listings
+    """
+    all_listings = []
+    offset = 0
+    page_size = 200
+    
+    while len(all_listings) < max_listings:
+        result = await search_for_sale(
+            city=city,
+            state_code=state_code,
+            min_beds=min_beds,
+            max_beds=max_beds,
+            min_price=min_price,
+            max_price=max_price,
+            limit=page_size,
+            offset=offset
+        )
+        
+        if result.get("error") or not result.get("listings"):
+            break
+        
+        all_listings.extend(result["listings"])
+        
+        # Check if we've fetched all available
+        if len(result["listings"]) < page_size:
+            break
+        
+        offset += page_size
+        await asyncio.sleep(API_RATE_LIMIT_DELAY)
+    
+    return all_listings[:max_listings]

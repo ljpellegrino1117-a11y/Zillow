@@ -14,6 +14,7 @@ export interface STRCompsFilters {
     petFriendly: boolean;
     hotTub: boolean;
   };
+  basement: 'any' | 'include' | 'exclude';  // Unfinished basement filter
   confidence: 'any' | 'medium' | 'high';
 }
 
@@ -49,7 +50,7 @@ export default function STRCompsFilter({ isOpen, onClose, filters, onApply }: ST
   if (!isOpen) return null;
 
   return (
-    <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-xl shadow-lg border border-gray-200 z-50">
+    <div className="absolute top-full left-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-200 z-50">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <div className="flex items-center gap-2">
@@ -112,6 +113,40 @@ export default function STRCompsFilter({ isOpen, onClose, filters, onApply }: ST
               </label>
             ))}
           </div>
+        </div>
+
+        {/* Unfinished Basement Filter */}
+        <div>
+          <label className="text-sm font-medium text-gray-700 mb-2 block">Unfinished Basement</label>
+          <div className="flex gap-2">
+            {[
+              { value: 'any', label: 'Any', title: 'Show all properties' },
+              { value: 'include', label: 'Include', title: 'Only show properties WITH unfinished basement' },
+              { value: 'exclude', label: 'Exclude', title: 'Only show properties WITHOUT unfinished basement' },
+            ].map(({ value, label, title }) => (
+              <button
+                key={value}
+                onClick={() => setLocalFilters(prev => ({ ...prev, basement: value as STRCompsFilters['basement'] }))}
+                title={title}
+                className={`flex-1 py-1.5 text-sm rounded-lg transition-colors ${
+                  localFilters.basement === value
+                    ? value === 'include' 
+                      ? 'bg-green-600 text-white'
+                      : value === 'exclude'
+                      ? 'bg-red-600 text-white'
+                      : 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            {localFilters.basement === 'include' && 'Showing only properties with unfinished basement'}
+            {localFilters.basement === 'exclude' && 'Excluding properties with unfinished basement'}
+            {localFilters.basement === 'any' && 'Showing all properties regardless of basement'}
+          </p>
         </div>
 
         {/* Data Confidence */}

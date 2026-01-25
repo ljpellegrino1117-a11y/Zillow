@@ -728,6 +728,34 @@ export const getInvestmentSuggestions = async (): Promise<InvestmentSuggestionsR
   return response.data;
 };
 
+// ==================== AI Advisor Q&A ====================
+
+export interface AIQuestionRequest {
+  question: string;
+  context?: {
+    cities?: string[];
+    filters?: Record<string, any>;
+  };
+}
+
+export interface AIQuestionResponse {
+  answer: string;
+  source: 'rule_based' | 'openai';
+  suggestions: string[];
+  data?: Record<string, any>;
+}
+
+export const askAIAdvisor = async (
+  question: string,
+  context?: AIQuestionRequest['context']
+): Promise<AIQuestionResponse> => {
+  const response = await axios.post<AIQuestionResponse>(`${API_BASE}/ai/ask`, {
+    question,
+    context
+  });
+  return response.data;
+};
+
 // ==================== Database Status ====================
 
 export interface DatabaseStatus {

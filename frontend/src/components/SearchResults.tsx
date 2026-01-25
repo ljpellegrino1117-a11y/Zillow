@@ -79,24 +79,192 @@ export default function SearchResults({ results, isLoading }: SearchResultsProps
 
   const exportToCSV = () => {
     const headers = [
-      'Rank', 'ROI Score', 'Address', 'City', 'State', 'Bedrooms', 'Monthly Rent',
-      'Est. Revenue', 'Est. Profit', 'Break-even', 'Agent', 'Phone', 'URL'
+      'Rank', 'ROI Score', 'Address', 'City', 'State', 'Zip Code', 'Bedrooms', 'Bathrooms', 'Sqft',
+      'Monthly Rent', 'Annual Rent', 'Est. Revenue', 'Est. Expenses', 'Est. Profit', 
+      'Break-even Occupancy', 'Agent Name', 'Agent Phone', 'Agent Email', 'Agent Company',
+      'Listing URL', 'Has Pool', 'Has Waterfront', 'Has Garage', 'Has Yard',
+      'Strengths', 'Weaknesses', 'Revenue Source'
     ];
     
     const rows = results.opportunities.map((opp, i) => [
-      i + 1, opp.roi_score, opp.address, opp.city, opp.state, opp.bedrooms,
-      opp.monthly_rent, opp.estimated_annual_revenue, opp.estimated_profit,
+      i + 1, opp.roi_score, opp.address, opp.city, opp.state, opp.zip_code || '',
+      opp.bedrooms, opp.bathrooms || '', opp.sqft || '',
+      opp.monthly_rent, opp.annual_rent, opp.estimated_annual_revenue, 
+      opp.estimated_expenses, opp.estimated_profit,
       `${(opp.break_even_occupancy * 100).toFixed(0)}%`,
-      opp.agent_name || '', opp.agent_phone || '', opp.url || ''
+      opp.agent_name || '', opp.agent_phone || '', opp.agent_email || '', opp.agent_company || '',
+      opp.url || '',
+      opp.has_pool ? 'Yes' : 'No', opp.has_waterfront ? 'Yes' : 'No',
+      opp.has_garage ? 'Yes' : 'No', opp.has_yard ? 'Yes' : 'No',
+      opp.strengths.join('; '), opp.weaknesses.join('; '),
+      opp.revenue_source
     ]);
     
-    const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `opportunities-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportToPDF = () => {
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Rental Arbitrage Opportunities</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
+          h1 { color: #1e40af; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
+          .summary { background: #eff6ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+          .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+          .summary-item { text-align: center; }
+          .summary-value { font-size: 24px; font-weight: bold; color: #1e40af; }
+          .summary-label { font-size: 12px; color: #6b7280; }
+          .opportunity { border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-bottom: 15px; page-break-inside: avoid; }
+          .opportunity-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+          .rank { background: #1e40af; color: white; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px; }
+          .score { padding: 4px 12px; border-radius: 20px; font-weight: bold; }
+          .score-high { background: #dcfce7; color: #16a34a; }
+          .score-good { background: #dbeafe; color: #2563eb; }
+          .score-medium { background: #fef3c7; color: #d97706; }
+          .score-low { background: #fee2e2; color: #dc2626; }
+          .address { font-size: 18px; font-weight: 600; margin: 0; display: inline; }
+          .location { color: #6b7280; font-size: 14px; margin-top: 4px; }
+          .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 15px 0; background: #f9fafb; padding: 10px; border-radius: 6px; }
+          .metric { text-align: center; }
+          .metric-value { font-size: 16px; font-weight: 600; }
+          .metric-label { font-size: 11px; color: #6b7280; }
+          .profit-positive { color: #16a34a; }
+          .profit-negative { color: #dc2626; }
+          .contact-section { background: #f0f9ff; padding: 10px; border-radius: 6px; margin: 10px 0; }
+          .contact-title { font-weight: 600; color: #1e40af; margin-bottom: 5px; }
+          .listing-link a { color: #2563eb; font-weight: 500; }
+          .strengths-weaknesses { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px; }
+          .strengths { color: #16a34a; }
+          .weaknesses { color: #d97706; }
+          .list-title { font-weight: 600; margin-bottom: 5px; }
+          .amenities { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+          .amenity { background: #e5e7eb; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+          .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280; }
+          @media print { .opportunity { page-break-inside: avoid; } }
+        </style>
+      </head>
+      <body>
+        <h1>Rental Arbitrage Opportunities</h1>
+        <p>Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+        
+        <div class="summary">
+          <div class="summary-grid">
+            <div class="summary-item">
+              <div class="summary-value">${results.total_found}</div>
+              <div class="summary-label">Opportunities Found</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${results.listings_analyzed.toLocaleString()}</div>
+              <div class="summary-label">Listings Analyzed</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${results.markets_searched}</div>
+              <div class="summary-label">Markets Searched</div>
+            </div>
+          </div>
+        </div>
+
+        ${results.ai_analysis ? `
+        <div style="background: #faf5ff; border: 1px solid #c4b5fd; border-radius: 8px; padding: 15px; margin: 20px 0;">
+          <div style="color: #7c3aed; font-weight: 600; margin-bottom: 10px;">AI Analysis</div>
+          <p>${results.ai_analysis}</p>
+        </div>
+        ` : ''}
+
+        <h2 style="color: #1e40af; margin-top: 30px;">Top Opportunities</h2>
+        
+        ${results.opportunities.map((opp, index) => `
+          <div class="opportunity">
+            <div class="opportunity-header">
+              <div>
+                <span class="rank">${index + 1}</span>
+                <span class="address">${opp.address}</span>
+                <div class="location">${opp.city}, ${opp.state} ${opp.zip_code || ''} | ${opp.bedrooms} BR ${opp.bathrooms ? `/ ${opp.bathrooms} BA` : ''} ${opp.sqft ? `| ${opp.sqft.toLocaleString()} sqft` : ''}</div>
+              </div>
+              <div class="score ${opp.roi_score >= 75 ? 'score-high' : opp.roi_score >= 60 ? 'score-good' : opp.roi_score >= 45 ? 'score-medium' : 'score-low'}">
+                ${opp.roi_score}/100
+              </div>
+            </div>
+            
+            <div class="metrics">
+              <div class="metric">
+                <div class="metric-value">$${opp.monthly_rent.toLocaleString()}/mo</div>
+                <div class="metric-label">Monthly Rent</div>
+              </div>
+              <div class="metric">
+                <div class="metric-value">$${opp.estimated_annual_revenue.toLocaleString()}/yr</div>
+                <div class="metric-label">Est. STR Revenue</div>
+              </div>
+              <div class="metric">
+                <div class="metric-value">$${opp.estimated_expenses.toLocaleString()}/yr</div>
+                <div class="metric-label">Est. Expenses</div>
+              </div>
+              <div class="metric">
+                <div class="metric-value ${opp.estimated_profit >= 0 ? 'profit-positive' : 'profit-negative'}">$${opp.estimated_profit.toLocaleString()}/yr</div>
+                <div class="metric-label">Est. Profit</div>
+              </div>
+            </div>
+            
+            <div class="contact-section">
+              <div class="contact-title">Contact Information</div>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; font-size: 13px;">
+                ${opp.agent_name ? `<div><strong>Agent:</strong> ${opp.agent_name}</div>` : ''}
+                ${opp.agent_company ? `<div><strong>Company:</strong> ${opp.agent_company}</div>` : ''}
+                ${opp.agent_phone ? `<div><strong>Phone:</strong> ${opp.agent_phone}</div>` : ''}
+                ${opp.agent_email ? `<div><strong>Email:</strong> ${opp.agent_email}</div>` : ''}
+              </div>
+              ${opp.url ? `<div class="listing-link" style="margin-top: 8px;"><strong>Listing:</strong> <a href="${opp.url}" target="_blank">${opp.url}</a></div>` : ''}
+            </div>
+            
+            <div class="strengths-weaknesses">
+              <div class="strengths">
+                <div class="list-title">Strengths</div>
+                ${opp.strengths.length > 0 ? opp.strengths.map(s => `<div>+ ${s}</div>`).join('') : '<div>None identified</div>'}
+              </div>
+              <div class="weaknesses">
+                <div class="list-title">Risks</div>
+                ${opp.weaknesses.length > 0 ? opp.weaknesses.map(w => `<div>- ${w}</div>`).join('') : '<div>None identified</div>'}
+              </div>
+            </div>
+            
+            <div class="amenities">
+              ${opp.has_pool ? '<span class="amenity">Pool</span>' : ''}
+              ${opp.has_waterfront ? '<span class="amenity">Waterfront</span>' : ''}
+              ${opp.has_garage ? '<span class="amenity">Garage</span>' : ''}
+              ${opp.has_yard ? '<span class="amenity">Yard</span>' : ''}
+              <span class="amenity">Source: ${opp.listing_source}</span>
+              <span class="amenity">Break-even: ${(opp.break_even_occupancy * 100).toFixed(0)}% occ.</span>
+            </div>
+          </div>
+        `).join('')}
+        
+        <div class="footer">
+          <p><strong>Score Guide:</strong> 75+ = Strong, 60-74 = Good, 45-59 = Moderate, &lt;45 = Higher risk</p>
+          <p><strong>Note:</strong> Profit estimates include operating costs (cleaning, supplies, platform fees, utilities, insurance, maintenance). Actual results may vary.</p>
+          <p>Generated by Zillow Arbitrage Tool</p>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.print();
+    }
   };
 
   return (
@@ -113,9 +281,18 @@ export default function SearchResults({ results, isLoading }: SearchResultsProps
           <button
             onClick={exportToCSV}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            title="Export all data with listing URLs"
           >
             <FileSpreadsheet className="w-4 h-4" />
             CSV
+          </button>
+          <button
+            onClick={exportToPDF}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            title="Print/save as PDF with clickable links"
+          >
+            <FileText className="w-4 h-4" />
+            PDF
           </button>
         </div>
       </div>

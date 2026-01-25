@@ -98,6 +98,10 @@ class ZillowListing(Base):
     # Listing type and creative financing (for for-sale listings)
     listing_type = Column(String(20), default='rental', index=True)  # 'rental' or 'for_sale'
     sale_price = Column(Float)  # For for-sale listings
+    zestimate = Column(Float, nullable=True)  # Zillow Zestimate value
+    zestimate_rent = Column(Float, nullable=True)  # Zillow rent Zestimate
+    estimated_rent = Column(Float, nullable=True)  # Our calculated estimated rent for for-sale
+    rent_estimation_method = Column(String(30), nullable=True)  # 'zestimate', 'mortgage', 'comparable', 'ai'
     has_creative_financing = Column(Boolean, default=False, index=True)
     financing_keywords = Column(Text)  # JSON list of matched keywords
     

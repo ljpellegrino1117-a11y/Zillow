@@ -19,7 +19,8 @@ interface ProfitFilterProps {
 }
 
 // Preset values for each filter
-const PROFIT_PRESETS = [0, 10000, 20000, 50000];
+// -999999 means "show all including negative profit"
+const PROFIT_PRESETS = [-999999, 0, 10000, 20000, 50000];
 const ROI_PRESETS = [0, 50, 60, 75];
 const BREAKEVEN_PRESETS = [100, 70, 60, 50];
 const RENT_MIN_PRESETS = [0, 1000, 2000, 3000, 5000];
@@ -178,10 +179,18 @@ export default function ProfitFilter({ isOpen, onClose, filters, onApply }: Prof
           <label className="text-sm font-medium text-gray-700 mb-2 block">Min Annual Profit</label>
           <div className="flex flex-wrap gap-2">
             <button
+              onClick={() => handleProfitPreset(-999999)}
+              className={presetBtnClass(!customProfit && localFilters.minProfit === -999999)}
+              title="Show all opportunities including negative profit"
+            >
+              All
+            </button>
+            <button
               onClick={() => handleProfitPreset(0)}
               className={presetBtnClass(!customProfit && localFilters.minProfit === 0)}
+              title="Only show profitable opportunities"
             >
-              Any
+              $0+
             </button>
             <button
               onClick={() => handleProfitPreset(10000)}
@@ -212,6 +221,9 @@ export default function ProfitFilter({ isOpen, onClose, filters, onApply }: Prof
               Custom
             </button>
           </div>
+          <p className="text-xs text-gray-500 mt-1">
+            "All" includes break-even and negative profit opportunities
+          </p>
           {customProfit && (
             <div className="mt-2 relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>

@@ -363,6 +363,12 @@ class OpportunitySearchRequest(BaseModel):
     min_profit: float = 0  # Minimum annual profit threshold
     amenities: Optional[List[str]] = None  # Required amenities
     max_results: int = 20  # Max opportunities to return
+    
+    # Basement filter: 'include', 'exclude', or None for any
+    basement_filter: Optional[str] = None  # 'include' = only with basement, 'exclude' = without basement
+    
+    # For-sale listings - estimate rent and include as opportunities
+    include_for_sale: bool = True  # Include for-sale listings with estimated rent
 
 
 class OpportunityListing(BaseModel):
@@ -376,9 +382,14 @@ class OpportunityListing(BaseModel):
     bedrooms: int
     bathrooms: Optional[float] = None
     sqft: Optional[int] = None
-    monthly_rent: float
+    monthly_rent: float  # Actual rent for rentals, estimated rent for for-sale
     url: Optional[str] = None
     photos: Optional[List[str]] = None
+    
+    # Listing type - rental or for_sale
+    listing_type: str = 'rental'  # 'rental' or 'for_sale'
+    sale_price: Optional[float] = None  # Sale price for for-sale listings
+    rent_estimation_method: Optional[str] = None  # For for-sale: 'zestimate', 'comparable', 'mortgage', 'ai'
     
     # Agent contact info
     agent_name: Optional[str] = None
@@ -392,6 +403,8 @@ class OpportunityListing(BaseModel):
     has_waterfront: bool = False
     has_garage: bool = False
     has_yard: bool = False
+    has_basement: bool = False
+    has_unfinished_basement: bool = False
     
     # Revenue estimates (from Airbtics)
     estimated_annual_revenue: float  # Occupancy-adjusted realistic estimate

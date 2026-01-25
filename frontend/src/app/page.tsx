@@ -43,11 +43,13 @@ const defaultSTRFilters: STRCompsFilters = {
     petFriendly: false,
     hotTub: false
   },
+  basement: 'any',
   confidence: 'any'
 };
 
+// Default min_profit is very negative to include all opportunities (including losses)
 const defaultProfitFilters: ProfitFilters = {
-  minProfit: 0,
+  minProfit: -999999,
   minRent: 0,
   maxRent: 50000,
   minROI: 0,
@@ -70,6 +72,9 @@ export default function Dashboard() {
   const [showNavMenu, setShowNavMenu] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
 
+  // Search bar state - for quick city/radius search
+  const [searchQuery, setSearchQuery] = useState('');
+
   const { cityStatuses, refreshAll } = useData();
   const citiesWithData = cityStatuses.filter(c => c.has_airbtics_data);
 
@@ -84,16 +89,19 @@ export default function Dashboard() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Check if filters have been modified
+  // Check if filters have been modified (or search query present)
   const hasLocationFilters = locationFilters.mode !== 'all' || 
     locationFilters.selectedCities.length > 0 ||
-    locationFilters.radiusCity !== '';
+    locationFilters.radiusCity !== '' ||
+    searchQuery.trim() !== '';
   
   const hasSTRFilters = strFilters.minBedrooms !== 3 || 
     strFilters.maxBedrooms !== 8 ||
-    Object.values(strFilters.amenities).some(v => v);
+    Object.values(strFilters.amenities).some(v => v) ||
+    strFilters.basement !== 'any';
   
-  const hasProfitFilters = profitFilters.minProfit > 0 || 
+  // Note: minProfit defaults to -999999 to show all, so check against that
+  const hasProfitFilters = profitFilters.minProfit > -999999 || 
     profitFilters.minROI > 0 ||
     profitFilters.maxBreakEven < 100;
 
@@ -115,8 +123,21 @@ export default function Dashboard() {
         max_results: 50
       };
 
+      // Check if user typed something in search bar - use that as city_radius search
+      const trimmedQuery = searchQuery.trim();
+      const hasSearchQuery = trimmedQuery !== '';
+
       // Handle location mode
-      if (isRapid || locationFilters.mode === 'all') {
+      if (isRapid) {
+        // Rapid search always searches all markets
+        request.search_mode = 'nationwide';
+      } else if (hasSearchQuery) {
+        // Search bar takes priority - search by city name/radius
+        request.search_mode = 'city_radius';
+        request.city = trimmedQuery;
+        request.radius_miles = locationFilters.radiusMiles || 25;
+        request.include_center_city = true;
+      } else if (locationFilters.mode === 'all') {
         request.search_mode = 'nationwide';
       } else if (locationFilters.mode === 'select') {
         request.search_mode = 'cities';
@@ -138,6 +159,11 @@ export default function Dashboard() {
         request.amenities = amenities;
       }
 
+      // Add basement filter
+      if (strFilters.basement !== 'any') {
+        request.basement_filter = strFilters.basement; // 'include' or 'exclude'
+      }
+
       const response = await findOpportunities(request);
       setResults(response);
     } catch (err: any) {
@@ -146,7 +172,7 @@ export default function Dashboard() {
     } finally {
       setIsSearching(false);
     }
-  }, [locationFilters, strFilters, profitFilters]);
+  }, [locationFilters, strFilters, profitFilters, searchQuery]);
 
   const handleManageData = () => {
     window.location.href = '/manage';
@@ -231,11 +257,31 @@ export default function Dashboard() {
             <Search className="w-5 h-5 text-gray-400 mr-3" />
             <input
               type="text"
-              placeholder="Search for rental arbitrage opportunities..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSearch(false);
+                }
+              }}
+              placeholder="Enter city name (e.g., Kansas City, MO)..."
               className="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400"
               onFocus={() => setActiveDropdown(null)}
             />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="p-1 hover:bg-gray-100 rounded-full ml-2"
+              >
+                <span className="text-gray-400 text-sm">×</span>
+              </button>
+            )}
           </div>
+          {searchQuery.trim() && (
+            <p className="text-xs text-gray-500 mt-1 ml-4">
+              Press Enter or click Search to find opportunities in "{searchQuery.trim()}"
+            </p>
+          )}
         </div>
 
         {/* Filter Buttons */}
@@ -319,6 +365,7 @@ export default function Dashboard() {
             onClick={() => handleSearch(true)}
             disabled={isSearching || citiesWithData.length === 0}
             className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full font-medium shadow-md hover:shadow-lg hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Search all markets at once, ignoring location filters. Best for finding top opportunities quickly."
           >
             {isSearching ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -331,6 +378,7 @@ export default function Dashboard() {
             onClick={() => handleSearch(false)}
             disabled={isSearching || citiesWithData.length === 0}
             className="flex items-center gap-2 px-6 py-2.5 bg-white text-gray-700 border border-gray-300 rounded-full font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Search using your selected filters (Locations, STR Comps, Profit). Best for targeted searches."
           >
             {isSearching ? (
               <Loader2 className="w-4 h-4 animate-spin" />
