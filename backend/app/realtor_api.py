@@ -258,7 +258,7 @@ async def search_all_rentals(
     state_code: str,
     min_beds: int = 3,
     max_beds: int = 8,
-    max_listings: int = 500,
+    max_listings: int = 2000,
 ) -> List[Dict[str, Any]]:
     """
     Search for all rental listings in a city, handling pagination.
@@ -268,7 +268,7 @@ async def search_all_rentals(
         state_code: State code
         min_beds: Minimum bedrooms
         max_beds: Maximum bedrooms
-        max_listings: Maximum total listings to fetch
+        max_listings: Maximum total listings to fetch (default 2000)
     
     Returns:
         List of all listings
@@ -410,7 +410,7 @@ async def search_all_rentals_by_zip(
     zip_code: str,
     min_beds: int = 3,
     max_beds: int = 8,
-    max_listings: int = 500,
+    max_listings: int = 2000,
 ) -> List[Dict[str, Any]]:
     """
     Search for all rental listings in a zip code, handling pagination.
@@ -419,7 +419,7 @@ async def search_all_rentals_by_zip(
         zip_code: ZIP code
         min_beds: Minimum bedrooms
         max_beds: Maximum bedrooms
-        max_listings: Maximum total listings to fetch
+        max_listings: Maximum total listings to fetch (default 2000)
     
     Returns:
         List of all listings

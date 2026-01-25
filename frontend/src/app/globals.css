@@ -109,6 +109,13 @@ body {
   @apply badge bg-blue-100 text-blue-800;
 }
 
+/* Smooth transitions */
+* {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
 /* Animations */
 @keyframes pulse-slow {
   0%, 100% {
@@ -122,3 +129,69 @@ body {
 .animate-pulse-slow {
   animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* Improved focus states */
+*:focus-visible {
+  @apply outline-none ring-2 ring-primary-500 ring-offset-2;
+}
+
+/* Better select styling */
+select.input {
+  @apply appearance-none bg-no-repeat bg-right pr-10;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right 0.5rem center;
+  background-size: 1.5em 1.5em;
+}
+
+/* Card hover effects */
+.card-hover {
+  @apply transition-all duration-200 hover:shadow-md hover:border-primary-200;
+}
+
+/* Opportunity card */
+.opportunity-card {
+  @apply bg-white rounded-xl border border-gray-200 overflow-hidden transition-all duration-200;
+}
+
+.opportunity-card:hover {
+  @apply shadow-lg border-blue-200;
+}
+
+/* Stats grid */
+.stats-grid {
+  @apply grid grid-cols-2 md:grid-cols-4 gap-4;
+}
+
+.stat-card {
+  @apply bg-gray-50 rounded-lg p-4 text-center;
+}
+
+.stat-value {
+  @apply text-2xl font-bold text-gray-900;
+}
+
+.stat-label {
+  @apply text-sm text-gray-600 mt-1;
+}
+
+/* Better loading states */
+.skeleton {
+  @apply animate-pulse bg-gray-200 rounded;
+}
+
+/* Improved button active states */
+.btn:active:not(:disabled) {
+  @apply transform scale-[0.98];
+}
+
+/* Score colors */
+.score-excellent { @apply bg-green-100 text-green-800; }
+.score-good { @apply bg-blue-100 text-blue-800; }
+.score-average { @apply bg-yellow-100 text-yellow-800; }
+.score-poor { @apply bg-red-100 text-red-800; }
+
+/* Profit colors */
+.profit-high { @apply text-green-600 font-bold; }
+.profit-medium { @apply text-blue-600 font-semibold; }
+.profit-low { @apply text-yellow-600; }
+.profit-negative { @apply text-red-600; }

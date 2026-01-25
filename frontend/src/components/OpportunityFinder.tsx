@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Search, 
   DollarSign, 
@@ -24,7 +24,8 @@ import {
   FileSpreadsheet,
   Calendar,
   Zap,
-  Clock
+  Clock,
+  X
 } from 'lucide-react';
 import { 
   findOpportunities, 
@@ -79,6 +80,18 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
   // Events state
   const [marketEvents, setMarketEvents] = useState<UserMarketEventsResponse | null>(null);
   const [eventsLoading, setEventsLoading] = useState(false);
+  
+  // Abort controller for cancelling searches
+  const abortControllerRef = useRef<AbortController | null>(null);
+  
+  // Cancel any in-flight search
+  const cancelSearch = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLoading(false);
+  }, []);
 
   // Load cities, data status, and events on mount
   useEffect(() => {
@@ -194,6 +207,12 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
       return;
     }
     
+    // Cancel any existing search
+    cancelSearch();
+    
+    // Create new abort controller
+    abortControllerRef.current = new AbortController();
+    
     setLoading(true);
     setError(null);
     
@@ -204,7 +223,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
         min_bedrooms: minBedrooms,
         max_bedrooms: maxBedrooms,
         min_profit: minProfit,
-        max_results: 20
+        max_results: 50  // Increased to show more opportunities
       };
       
       if (searchMode === 'cities') {
@@ -219,12 +238,24 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
       // nationwide mode doesn't need extra params
       
       const response = await findOpportunities(request);
-      setResults(response);
+      
+      // Only update if not aborted
+      if (!abortControllerRef.current?.signal.aborted) {
+        setResults(response);
+      }
     } catch (err: any) {
+      // Ignore abort errors
+      if (err.name === 'AbortError' || err.message === 'canceled') {
+        return;
+      }
       console.error('Search failed:', err);
-      setError(err.response?.data?.detail || 'Failed to search for opportunities');
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to search for opportunities';
+      setError(errorMessage);
     } finally {
-      setLoading(false);
+      if (!abortControllerRef.current?.signal.aborted) {
+        setLoading(false);
+      }
+      abortControllerRef.current = null;
     }
   };
 
@@ -838,11 +869,11 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
             </select>
           </div>
           
-          <div className="flex items-end">
+          <div className="flex items-end gap-2">
             <button
               onClick={handleSearch}
               disabled={loading || (searchMode === 'cities' && selectedCities.length === 0) || (searchMode === 'city_radius' && !radiusCity.trim()) || (searchMode === 'zip_code' && !zipCodes.trim())}
-              className="btn btn-primary w-full"
+              className="btn btn-primary flex-1"
             >
               {loading ? (
                 <>
@@ -856,6 +887,15 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                 </>
               )}
             </button>
+            {loading && (
+              <button
+                onClick={cancelSearch}
+                className="btn bg-gray-200 hover:bg-gray-300 text-gray-700 px-3"
+                title="Cancel search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>

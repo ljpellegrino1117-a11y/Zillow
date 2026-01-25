@@ -45,12 +45,13 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
     loadData();
   }, [refreshTrigger]);
 
-  // Poll for batch scrape status when scraping
+  // Poll for batch scrape status when scraping - with exponential backoff
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
+    let pollCount = 0;
     
     if (isScraping) {
-      interval = setInterval(async () => {
+      const poll = async () => {
         try {
           const status = await getBatchScrapeStatus();
           setBatchScrapeStatus(status);
@@ -59,15 +60,26 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
             setIsScraping(false);
             // Refresh data after scrape completes
             loadData();
+            return;
           }
+          
+          // Schedule next poll with slight backoff after 10 polls
+          pollCount++;
+          const nextDelay = pollCount > 10 ? 8000 : 5000;
+          interval = setTimeout(poll, nextDelay);
         } catch (err) {
           console.error('Failed to get batch scrape status:', err);
+          // Retry after longer delay on error
+          interval = setTimeout(poll, 10000);
         }
-      }, 3000); // Poll every 3 seconds
+      };
+      
+      // Start polling
+      interval = setTimeout(poll, 2000); // Initial quick poll
     }
     
     return () => {
-      if (interval) clearInterval(interval);
+      if (interval) clearTimeout(interval);
     };
   }, [isScraping]);
 
@@ -246,7 +258,7 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
               </span>
             )}
             
-            {/* Scrape All Listings Button */}
+            {/* Fetch Long-Term Rental Listings Button */}
             {marketsWithData > 0 && (
               <button
                 onClick={handleScrapeAllCities}
@@ -256,19 +268,19 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
                     ? 'bg-orange-500 cursor-not-allowed' 
                     : 'bg-green-600 hover:bg-green-700'
                 }`}
-                title="Pull rental listings from Zillow & Realtor.com for all cities with revenue data"
+                title="Fetch long-term rental listings (houses/condos for rent) from Realtor.com for all markets with revenue data"
               >
                 {isScraping ? (
                   <>
                     <Loader2 className="w-3 h-3 animate-spin" />
                     {batchScrapeStatus?.current_city 
-                      ? `Scraping ${batchScrapeStatus.completed_cities}/${batchScrapeStatus.total_cities}...`
+                      ? `Fetching ${batchScrapeStatus.completed_cities}/${batchScrapeStatus.total_cities}...`
                       : 'Starting...'}
                   </>
                 ) : (
                   <>
                     <Home className="w-3 h-3" />
-                    Scrape All Listings
+                    Fetch LTR Listings
                   </>
                 )}
               </button>

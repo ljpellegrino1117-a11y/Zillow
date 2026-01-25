@@ -723,7 +723,7 @@ export interface InvestmentSuggestions {
   total_data_points: number;
 }
 
-export const getInvestmentSuggestions = async (): Promise<InvestmentSuggestions> => {
+export const getInvestmentSuggestions = async (): Promise<InvestmentSuggestionsResponse> => {
   const response = await axios.post(`${API_BASE}/ai/investment-suggestions`);
   return response.data;
 };
@@ -1025,10 +1025,4 @@ export const createCustomEvent = async (event: EventCreate): Promise<EventData> 
 export const deleteCustomEvent = async (eventId: number): Promise<void> => {
   await axios.delete(`${API_BASE}/events/${eventId}`);
   invalidateCache('events');
-};
-
-// Get AI investment suggestions with event awareness
-export const getInvestmentSuggestions = async (): Promise<InvestmentSuggestionsResponse> => {
-  const response = await axios.post(`${API_BASE}/ai/investment-suggestions`);
-  return response.data;
 };

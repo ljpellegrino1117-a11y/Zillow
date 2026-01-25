@@ -2708,7 +2708,7 @@ async def find_opportunities(
                         zip_code=zip_code,
                         min_beds=request.min_bedrooms,
                         max_beds=request.max_bedrooms,
-                        max_listings=100
+                        max_listings=500
                     )
                 except Exception as e:
                     logger.error(f"Realtor API error for zip {zip_code}: {str(e)}")
@@ -2749,7 +2749,69 @@ async def find_opportunities(
             zip_opps = await analyze_listings(listings, revenue_by_bedroom, "", "", None)
             opportunities.extend(zip_opps)
     
-    # Process by city
+    # ==========================================================================
+    # OPTIMIZED: For city_radius mode, fetch ALL listings from DB in ONE query
+    # instead of making API calls for each of 294 cities
+    # ==========================================================================
+    
+    if search_mode == "city_radius" and hasattr(request, '_center_city_revenue') and request._center_city_revenue:
+        # Build revenue lookup from center city
+        revenue_by_bedroom = {}
+        for rd in request._center_city_revenue:
+            for br in range(rd.bedrooms_min, rd.bedrooms_max + 1):
+                if br not in revenue_by_bedroom:
+                    revenue_by_bedroom[br] = rd
+                    revenue_sources[rd.source or "manual"] = revenue_sources.get(rd.source or "manual", 0) + 1
+        
+        # Get ALL listings from database that match our criteria (FAST - single query)
+        all_db_listings = db.query(ZillowListing).filter(
+            ZillowListing.bedrooms >= request.min_bedrooms,
+            ZillowListing.bedrooms <= request.max_bedrooms,
+            ZillowListing.status == 'active',
+            ZillowListing.price > 100,  # Filter out bad data ($1/mo rent)
+            ZillowListing.price < 50000  # Filter out obvious errors
+        ).all()
+        
+        # Convert to dict format
+        all_listings = [{
+            "listing_id": l.id,
+            "address": l.address,
+            "city": l.city or "",
+            "state": l.state or "",
+            "zip_code": l.zip_code,
+            "bedrooms": l.bedrooms,
+            "bathrooms": l.bathrooms,
+            "price": l.price,
+            "sqft": l.sqft,
+            "url": l.url,
+            "photos": json.loads(l.photos) if l.photos else [],
+            "agent_name": l.agent_name,
+            "agent_phone": l.agent_phone,
+            "agent_email": l.agent_email,
+            "agent_company": l.agent_company,
+            "listing_source": l.listing_source or "zillow",
+            "has_pool": l.has_pool,
+            "has_waterfront": l.has_waterfront,
+            "has_garage": l.has_garage,
+            "has_yard": l.has_yard,
+        } for l in all_db_listings]
+        
+        logger.info(f"Analyzing {len(all_listings)} listings from database for radius search")
+        
+        # Analyze all listings at once
+        radius_opps = await analyze_listings(
+            all_listings, 
+            revenue_by_bedroom, 
+            request._center_city_name, 
+            request._center_state, 
+            None
+        )
+        opportunities.extend(radius_opps)
+        
+        # Skip the per-city loop since we've processed everything
+        cities_to_search = []
+    
+    # Process by city (for non-radius modes)
     for city_name, state_code in cities_to_search:
         city_record = db.query(City).filter(
             func.lower(City.city) == city_name.lower(),
@@ -2758,27 +2820,21 @@ async def find_opportunities(
         
         revenue_data_list = []
         
-        # For city_radius mode, use center city's revenue data for all cities in radius
-        if search_mode == "city_radius" and hasattr(request, '_center_city_revenue') and request._center_city_revenue:
-            revenue_data_list = request._center_city_revenue
-        else:
-            # Normal lookup - check this specific city's revenue data
-            if city_record:
-                revenue_data_list = db.query(AirDNAData).filter(
-                    AirDNAData.city_id == city_record.id
-                ).all()
-            
-            if not revenue_data_list:
-                from sqlalchemy import and_
-                revenue_data_list = db.query(AirDNAData).join(City).filter(
-                    func.lower(City.city) == city_name.lower(),
-                    func.lower(City.state) == state_code.lower()
-                ).all()
+        # Normal lookup - check this specific city's revenue data
+        if city_record:
+            revenue_data_list = db.query(AirDNAData).filter(
+                AirDNAData.city_id == city_record.id
+            ).all()
         
         if not revenue_data_list:
-            # Only warn if NOT in city_radius mode (since we already warned about center city)
-            if search_mode != "city_radius":
-                warnings.append(f"No revenue data for {city_name}, {state_code}")
+            from sqlalchemy import and_
+            revenue_data_list = db.query(AirDNAData).join(City).filter(
+                func.lower(City.city) == city_name.lower(),
+                func.lower(City.state) == state_code.lower()
+            ).all()
+        
+        if not revenue_data_list:
+            warnings.append(f"No revenue data for {city_name}, {state_code}")
             continue
         
         revenue_by_bedroom = {}
@@ -2788,28 +2844,16 @@ async def find_opportunities(
                     revenue_by_bedroom[br] = rd
                     revenue_sources[rd.source or "manual"] = revenue_sources.get(rd.source or "manual", 0) + 1
         
+        # First try database listings (faster)
         listings = []
-        
-        if use_realtor_api:
-            try:
-                api_listings = await realtor_api.search_all_rentals(
-                    city=city_name,
-                    state_code=state_code,
-                    min_beds=request.min_bedrooms,
-                    max_beds=request.max_bedrooms,
-                    max_listings=100
-                )
-                listings = api_listings
-            except Exception as e:
-                logger.error(f"Realtor API error for {city_name}: {str(e)}")
-                warnings.append(f"API error for {city_name}: {str(e)}")
-        
-        if not listings and city_record:
+        if city_record:
             db_listings = db.query(ZillowListing).filter(
                 ZillowListing.city_id == city_record.id,
                 ZillowListing.bedrooms >= request.min_bedrooms,
                 ZillowListing.bedrooms <= request.max_bedrooms,
-                ZillowListing.listing_type == 'rental'
+                ZillowListing.status == 'active',
+                ZillowListing.price > 100,  # Filter bad data
+                ZillowListing.price < 50000
             ).all()
             
             listings = [{
@@ -2834,6 +2878,21 @@ async def find_opportunities(
                 "has_garage": l.has_garage,
                 "has_yard": l.has_yard,
             } for l in db_listings]
+        
+        # Only call API if no database listings and API is configured
+        if not listings and use_realtor_api:
+            try:
+                api_listings = await realtor_api.search_all_rentals(
+                    city=city_name,
+                    state_code=state_code,
+                    min_beds=request.min_bedrooms,
+                    max_beds=request.max_bedrooms,
+                    max_listings=500
+                )
+                listings = api_listings
+            except Exception as e:
+                logger.error(f"Realtor API error for {city_name}: {str(e)}")
+                warnings.append(f"API error for {city_name}: {str(e)}")
         
         city_opps = await analyze_listings(listings, revenue_by_bedroom, city_name, state_code, None)
         opportunities.extend(city_opps)
