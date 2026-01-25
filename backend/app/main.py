@@ -2562,10 +2562,10 @@ def get_database_status(db: Session = Depends(get_db)):
     listing_count = db.query(func.count(ZillowListing.id)).scalar()
     market_count = db.query(func.count(AirbticsMarket.id)).scalar()
     
-    # Get cities with Airbtics data
+    # Get cities with Airbtics data (use city_id foreign key)
     cities_with_data = db.query(City).join(
         AirDNAData, 
-        (City.city == AirDNAData.city) & (City.state == AirDNAData.state),
+        City.id == AirDNAData.city_id,
         isouter=False
     ).distinct().count()
     

@@ -462,7 +462,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
           </div>
           <div>
             <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-              Opportunity Finder
+              Instant Opportunity Finder
               <Sparkles className="h-5 w-5 text-yellow-500" />
             </h2>
             <p className="text-sm text-gray-600">
@@ -508,9 +508,10 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
+              title="Search all markets that have revenue data"
             >
               <MapPin className="h-4 w-4" />
-              All Markets (Nationwide)
+              All Markets
             </button>
             <button
               onClick={() => setSearchMode('cities')}
@@ -519,9 +520,10 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
+              title="Select from your configured cities"
             >
               <Building className="h-4 w-4" />
-              Specific Cities
+              My Saved Cities
             </button>
             <button
               onClick={() => setSearchMode('city_radius')}
@@ -530,9 +532,10 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
+              title="Search any city + surrounding area"
             >
               <Home className="h-4 w-4" />
-              City + Radius
+              Search by City
             </button>
             <button
               onClick={() => setSearchMode('zip_code')}
@@ -541,9 +544,10 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
+              title="Search by specific zip codes"
             >
               <MapPin className="h-4 w-4" />
-              Zip Code
+              Search by Zip
             </button>
           </div>
         </div>
@@ -576,7 +580,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
               <label className="block text-sm font-medium text-gray-700">
-                Select Markets to Search
+                Select from Your Saved Markets
               </label>
               {selectedCities.length > 0 && (
                 <div className="flex items-center gap-2 text-sm">
@@ -638,9 +642,9 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
               ) : (
                 <div className="text-center py-6">
                   <AlertTriangle className="h-8 w-8 text-yellow-400 mx-auto mb-2" />
-                  <p className="text-gray-600 font-medium">No markets configured</p>
+                  <p className="text-gray-600 font-medium">No saved markets</p>
                   <p className="text-gray-500 text-sm mt-1">
-                    Add cities in Data Management below, or use Nationwide search.
+                    Add cities in Data Management below, or use "Search by City" to search any city.
                   </p>
                 </div>
               )}
@@ -665,7 +669,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
           <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                City (e.g., Austin, TX)
+                Target City (e.g., Austin, TX)
               </label>
               <input
                 type="text"
@@ -683,20 +687,28 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                 type="number"
                 value={radiusMiles}
                 onChange={(e) => setRadiusMiles(Number(e.target.value))}
-                min={5}
+                min={0}
                 max={100}
                 className="input w-full"
               />
+              <p className="text-xs text-gray-500 mt-1">Set to 0 for target city only</p>
             </div>
             <div className="md:col-span-3">
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-2 cursor-pointer group relative">
                 <input
                   type="checkbox"
-                  checked={includeCenterCity}
-                  onChange={(e) => setIncludeCenterCity(e.target.checked)}
+                  checked={!includeCenterCity}
+                  onChange={(e) => setIncludeCenterCity(!e.target.checked)}
                   className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
-                <span className="text-sm text-gray-700">Include center city in results</span>
+                <span className="text-sm text-gray-700">Do not include target city in results</span>
+                <div className="relative">
+                  <AlertTriangle className="h-4 w-4 text-gray-400 cursor-help" />
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                    Use this if target city does not allow short-term rentals
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                  </div>
+                </div>
               </label>
             </div>
           </div>
