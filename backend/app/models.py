@@ -202,6 +202,29 @@ class AirbticsMarket(Base):
     )
 
 
+class CustomEvent(Base):
+    """User-defined events that affect STR demand"""
+    __tablename__ = "custom_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    city = Column(String(100), nullable=False)
+    state = Column(String(50), nullable=False)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    event_type = Column(String(50), default='other')  # sports, conference, festival, holiday, cultural, political, other
+    demand_multiplier = Column(Float, default=1.5)  # Expected demand increase (1.0 = normal)
+    recurrence = Column(String(20), default='one_time')  # one_time, annual, varies
+    description = Column(Text, nullable=True)
+    affects_radius_miles = Column(Integer, default=25)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_custom_events_city_state', 'city', 'state'),
+        Index('idx_custom_events_dates', 'start_date', 'end_date'),
+    )
+
+
 class AIScreenshotAnalysis(Base):
     """Stores AI screenshot analyses permanently for future reference"""
     __tablename__ = "ai_screenshot_analyses"

@@ -1,19 +1,21 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Home, Trash2, ChevronDown, ChevronUp, Settings } from 'lucide-react';
+import { Home, Trash2, ChevronDown, ChevronUp, Settings, Brain } from 'lucide-react';
 import CityManager from '@/components/CityManager';
 import AirDNAInput from '@/components/AirDNAInput';
 import DashboardSummary from '@/components/DashboardSummary';
 import OpportunityFinder from '@/components/OpportunityFinder';
 import DataStatusBar from '@/components/DataStatusBar';
 import MarketsOverview from '@/components/MarketsOverview';
+import AIInvestmentSuggestions from '@/components/AIInvestmentSuggestions';
 import { getCities, deleteCity } from '@/lib/api';
 
 export default function Dashboard() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [clearing, setClearing] = useState(false);
   const [showDataManagement, setShowDataManagement] = useState(false);
+  const [showAIAdvisor, setShowAIAdvisor] = useState(false);
   
   // Ref for scrolling to data management
   const dataManagementRef = useRef<HTMLDivElement>(null);
@@ -94,7 +96,34 @@ export default function Dashboard() {
           <OpportunityFinder refreshTrigger={refreshTrigger} />
         </div>
 
-        {/* Level 3: Data Management - Collapsible */}
+        {/* Level 3: AI Event Advisor - Collapsible */}
+        <div className="mb-6">
+          <button
+            onClick={() => setShowAIAdvisor(!showAIAdvisor)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg hover:from-indigo-100 hover:to-purple-100 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Brain className="w-5 h-5 text-indigo-600" />
+              <span className="font-medium text-indigo-900">AI Event Advisor</span>
+              <span className="text-sm text-indigo-600">
+                (Investment analysis & event tracking)
+              </span>
+            </div>
+            {showAIAdvisor ? (
+              <ChevronUp className="w-5 h-5 text-indigo-400" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-indigo-400" />
+            )}
+          </button>
+          
+          {showAIAdvisor && (
+            <div className="mt-4">
+              <AIInvestmentSuggestions refreshTrigger={refreshTrigger} />
+            </div>
+          )}
+        </div>
+
+        {/* Level 4: Data Management - Collapsible */}
         <div ref={dataManagementRef} className="mb-6">
           <button
             onClick={() => setShowDataManagement(!showDataManagement)}

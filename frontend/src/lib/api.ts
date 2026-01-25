@@ -877,3 +877,158 @@ export const getRealtorApiStatus = async (): Promise<RealtorApiStatus> => {
   const response = await axios.get(`${API_BASE}/opportunities/api-status`);
   return response.data;
 };
+
+// ==================== Events API ====================
+
+export interface EventData {
+  id?: number;
+  name: string;
+  city: string;
+  state: string;
+  start_date: string;
+  end_date: string;
+  event_type: string;
+  demand_multiplier: number;
+  recurrence: string;
+  description: string;
+  affects_radius_miles: number;
+  is_custom: boolean;
+  days_until: number;
+  urgency: 'past' | 'urgent' | 'high' | 'medium' | 'strategic';
+}
+
+export interface EventsListResponse {
+  events: EventData[];
+  total_curated: number;
+  total_custom: number;
+  markets_with_events: number;
+}
+
+export interface MarketEventsResponse {
+  city: string;
+  state: string;
+  events: EventData[];
+  total_events: number;
+  highest_demand_multiplier: number;
+  nearest_event_days: number | null;
+}
+
+export interface EventCreate {
+  name: string;
+  city: string;
+  state: string;
+  start_date: string;
+  end_date: string;
+  event_type?: string;
+  demand_multiplier?: number;
+  recurrence?: string;
+  description?: string;
+  affects_radius_miles?: number;
+}
+
+export interface UserMarketEventsResponse {
+  urgent: EventData[];
+  high: EventData[];
+  medium: EventData[];
+  strategic: EventData[];
+  total_events: number;
+  markets_affected: number;
+}
+
+export interface InvestmentSuggestionsResponse {
+  suggestions: string;
+  top_opportunities: Array<{
+    city: string;
+    state: string;
+    avg_annual_revenue: number;
+    data_points: number;
+    bedroom_counts: number[];
+    data_sources: string[];
+    events?: Array<{
+      name: string;
+      dates: string;
+      days_until: number;
+      urgency: string;
+      demand_multiplier: number;
+      type: string;
+    }>;
+  }>;
+  event_opportunities: Array<{
+    city: string;
+    state: string;
+    avg_annual_revenue: number;
+    events: Array<{
+      name: string;
+      dates: string;
+      days_until: number;
+      urgency: string;
+      demand_multiplier: number;
+    }>;
+  }>;
+  events_by_urgency: {
+    urgent: EventData[];
+    high: EventData[];
+    medium: EventData[];
+    strategic: EventData[];
+  };
+  generated_at: string;
+  markets_analyzed: number;
+  total_data_points: number;
+  total_events_tracked?: number;
+}
+
+// Get all events (curated + custom)
+export const getAllEvents = async (daysAhead: number = 365): Promise<EventsListResponse> => {
+  const cacheKey = makeCacheKey('events', daysAhead);
+  const cached = getCached<EventsListResponse>(cacheKey);
+  if (cached) return cached;
+  
+  const response = await axios.get(`${API_BASE}/events`, {
+    params: { days_ahead: daysAhead }
+  });
+  setCache(cacheKey, response.data, STATIC_CACHE_TTL);
+  return response.data;
+};
+
+// Get events for a specific market
+export const getEventsForMarket = async (city: string, state: string): Promise<MarketEventsResponse> => {
+  const cacheKey = makeCacheKey('events-market', city, state);
+  const cached = getCached<MarketEventsResponse>(cacheKey);
+  if (cached) return cached;
+  
+  const response = await axios.get(`${API_BASE}/events/by-market`, {
+    params: { city, state }
+  });
+  setCache(cacheKey, response.data, DEFAULT_CACHE_TTL);
+  return response.data;
+};
+
+// Get events for user's configured markets
+export const getEventsForUserMarkets = async (): Promise<UserMarketEventsResponse> => {
+  const cacheKey = 'events-user-markets';
+  const cached = getCached<UserMarketEventsResponse>(cacheKey);
+  if (cached) return cached;
+  
+  const response = await axios.get(`${API_BASE}/events/for-user-markets`);
+  setCache(cacheKey, response.data, DEFAULT_CACHE_TTL);
+  return response.data;
+};
+
+// Create a custom event
+export const createCustomEvent = async (event: EventCreate): Promise<EventData> => {
+  const response = await axios.post(`${API_BASE}/events`, event);
+  invalidateCache('events');
+  return response.data;
+};
+
+// Delete a custom event
+export const deleteCustomEvent = async (eventId: number): Promise<void> => {
+  await axios.delete(`${API_BASE}/events/${eventId}`);
+  invalidateCache('events');
+};
+
+// Get AI investment suggestions with event awareness
+export const getInvestmentSuggestions = async (): Promise<InvestmentSuggestionsResponse> => {
+  const response = await axios.post(`${API_BASE}/ai/investment-suggestions`);
+  return response.data;
+};

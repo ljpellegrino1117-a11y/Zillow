@@ -425,3 +425,58 @@ class OpportunitySearchResponse(BaseModel):
     listings_analyzed: int
     revenue_data_sources: dict  # Count by source
     warnings: List[str] = []
+
+
+# ==================== Event Schemas ====================
+
+class EventCreate(BaseModel):
+    """Schema for creating a custom event"""
+    name: str
+    city: str
+    state: str
+    start_date: datetime
+    end_date: datetime
+    event_type: str = 'other'  # sports, conference, festival, holiday, cultural, political, other
+    demand_multiplier: float = 1.5
+    recurrence: str = 'one_time'  # one_time, annual, varies
+    description: Optional[str] = None
+    affects_radius_miles: int = 25
+
+
+class EventResponse(BaseModel):
+    """Response schema for an event (curated or custom)"""
+    id: Optional[int] = None
+    name: str
+    city: str
+    state: str
+    start_date: str  # ISO format
+    end_date: str
+    event_type: str
+    demand_multiplier: float
+    recurrence: str
+    description: str
+    affects_radius_miles: int
+    is_custom: bool = False
+    days_until: int
+    urgency: str  # 'past', 'urgent', 'high', 'medium', 'strategic'
+
+    class Config:
+        from_attributes = True
+
+
+class EventsListResponse(BaseModel):
+    """Response for listing all events"""
+    events: List[EventResponse]
+    total_curated: int
+    total_custom: int
+    markets_with_events: int
+
+
+class MarketEventsResponse(BaseModel):
+    """Events for a specific market"""
+    city: str
+    state: str
+    events: List[EventResponse]
+    total_events: int
+    highest_demand_multiplier: float
+    nearest_event_days: Optional[int] = None

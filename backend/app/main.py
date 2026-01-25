@@ -13,7 +13,7 @@ import base64
 import os
 
 from .database import engine, get_db, Base, DATABASE_URL, is_sqlite, LISTING_RETENTION_DAYS
-from .models import City, ZillowListing, AirDNAData, AIScreenshotAnalysis, AirbticsMarket
+from .models import City, ZillowListing, AirDNAData, AIScreenshotAnalysis, AirbticsMarket, CustomEvent
 from .schemas import (
     CityCreate, CityResponse,
     ZillowListingResponse, ListingsStatsResponse,
@@ -28,6 +28,7 @@ from .scraper import scrape_zillow
 from . import airbtics
 from . import realtor_api
 from . import geocoding
+from . import events as events_module
 import math
 import json
 from datetime import timedelta
@@ -2489,6 +2490,7 @@ async def find_opportunities(
     
     elif search_mode == "city_radius":
         # Search city + surrounding area
+        # NOTE: Revenue data from the CENTER city is applied to ALL listings in the radius
         if not request.city:
             raise HTTPException(status_code=400, detail="City is required for city_radius mode")
         
@@ -2522,6 +2524,35 @@ async def find_opportunities(
             warnings.append(f"Geocoding failed: {str(e)}. Searching center city only.")
             if request.include_center_city:
                 cities_to_search.append((center_city, state_code))
+        
+        # For city_radius mode, we use the CENTER city's revenue data for all listings
+        # This makes sense because STR revenue is similar within a metro area
+        center_city_revenue_data = None
+        center_city_record = db.query(City).filter(
+            func.lower(City.city) == center_city.lower(),
+            func.lower(City.state) == state_code.lower()
+        ).first()
+        
+        if center_city_record:
+            center_city_revenue_data = db.query(AirDNAData).filter(
+                AirDNAData.city_id == center_city_record.id
+            ).all()
+        
+        # If center city has no record, try to find revenue data by city name directly
+        if not center_city_revenue_data:
+            center_city_revenue_data = db.query(AirDNAData).join(City).filter(
+                func.lower(City.city) == center_city.lower(),
+                func.lower(City.state) == state_code.lower()
+            ).all()
+        
+        # Store for later use in the city loop
+        if center_city_revenue_data:
+            request._center_city_revenue = center_city_revenue_data
+            request._center_city_name = center_city
+            request._center_state = state_code
+            logger.info(f"Using {center_city}, {state_code} revenue data for all {len(cities_to_search)} cities in radius")
+        else:
+            warnings.append(f"No revenue data for center city {center_city}, {state_code}. Add revenue data for this city first.")
     
     elif search_mode == "zip_code":
         # Search by zip codes
@@ -2713,20 +2744,28 @@ async def find_opportunities(
         ).first()
         
         revenue_data_list = []
-        if city_record:
-            revenue_data_list = db.query(AirDNAData).filter(
-                AirDNAData.city_id == city_record.id
-            ).all()
+        
+        # For city_radius mode, use center city's revenue data for all cities in radius
+        if search_mode == "city_radius" and hasattr(request, '_center_city_revenue') and request._center_city_revenue:
+            revenue_data_list = request._center_city_revenue
+        else:
+            # Normal lookup - check this specific city's revenue data
+            if city_record:
+                revenue_data_list = db.query(AirDNAData).filter(
+                    AirDNAData.city_id == city_record.id
+                ).all()
+            
+            if not revenue_data_list:
+                from sqlalchemy import and_
+                revenue_data_list = db.query(AirDNAData).join(City).filter(
+                    func.lower(City.city) == city_name.lower(),
+                    func.lower(City.state) == state_code.lower()
+                ).all()
         
         if not revenue_data_list:
-            from sqlalchemy import and_
-            revenue_data_list = db.query(AirDNAData).join(City).filter(
-                func.lower(City.city) == city_name.lower(),
-                func.lower(City.state) == state_code.lower()
-            ).all()
-        
-        if not revenue_data_list:
-            warnings.append(f"No revenue data for {city_name}, {state_code}")
+            # Only warn if NOT in city_radius mode (since we already warned about center city)
+            if search_mode != "city_radius":
+                warnings.append(f"No revenue data for {city_name}, {state_code}")
             continue
         
         revenue_by_bedroom = {}
@@ -3064,14 +3103,331 @@ async def test_all_apis(db: Session = Depends(get_db)):
     return results
 
 
+# ==================== Events API ====================
+
+from .schemas import EventCreate, EventResponse, EventsListResponse, MarketEventsResponse
+
+@app.get("/api/events", response_model=EventsListResponse)
+def get_all_events(
+    days_ahead: int = Query(365, ge=30, le=730),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all events (curated + custom) happening within the specified timeframe.
+    """
+    # Get custom events from database
+    custom_events_db = db.query(CustomEvent).all()
+    custom_events_list = [
+        {
+            "id": ce.id,
+            "name": ce.name,
+            "city": ce.city,
+            "state": ce.state,
+            "start_date": ce.start_date.date() if hasattr(ce.start_date, 'date') else ce.start_date,
+            "end_date": ce.end_date.date() if hasattr(ce.end_date, 'date') else ce.end_date,
+            "event_type": ce.event_type,
+            "demand_multiplier": ce.demand_multiplier,
+            "recurrence": ce.recurrence,
+            "description": ce.description or "",
+            "affects_radius_miles": ce.affects_radius_miles
+        }
+        for ce in custom_events_db
+    ]
+    
+    # Get all upcoming events
+    all_events = events_module.get_all_upcoming_events(custom_events_list, days_ahead)
+    
+    # Convert to response format
+    events_response = [
+        EventResponse(
+            id=e.id,
+            name=e.name,
+            city=e.city,
+            state=e.state,
+            start_date=e.start_date.isoformat(),
+            end_date=e.end_date.isoformat(),
+            event_type=e.event_type.value if hasattr(e.event_type, 'value') else e.event_type,
+            demand_multiplier=e.demand_multiplier,
+            recurrence=e.recurrence.value if hasattr(e.recurrence, 'value') else e.recurrence,
+            description=e.description,
+            affects_radius_miles=e.affects_radius_miles,
+            is_custom=e.is_custom,
+            days_until=e.days_until,
+            urgency=e.urgency_level
+        )
+        for e in all_events
+    ]
+    
+    # Count unique markets
+    markets = set(f"{e.city}, {e.state}" for e in all_events)
+    
+    return EventsListResponse(
+        events=events_response,
+        total_curated=len([e for e in all_events if not e.is_custom]),
+        total_custom=len([e for e in all_events if e.is_custom]),
+        markets_with_events=len(markets)
+    )
+
+
+@app.get("/api/events/by-market", response_model=MarketEventsResponse)
+def get_events_by_market(
+    city: str,
+    state: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all events affecting a specific market.
+    """
+    # Get custom events from database
+    custom_events_db = db.query(CustomEvent).filter(
+        func.lower(CustomEvent.city) == city.lower(),
+        func.lower(CustomEvent.state) == state.lower()
+    ).all()
+    
+    custom_events_list = [
+        {
+            "id": ce.id,
+            "name": ce.name,
+            "city": ce.city,
+            "state": ce.state,
+            "start_date": ce.start_date.date() if hasattr(ce.start_date, 'date') else ce.start_date,
+            "end_date": ce.end_date.date() if hasattr(ce.end_date, 'date') else ce.end_date,
+            "event_type": ce.event_type,
+            "demand_multiplier": ce.demand_multiplier,
+            "recurrence": ce.recurrence,
+            "description": ce.description or "",
+            "affects_radius_miles": ce.affects_radius_miles
+        }
+        for ce in custom_events_db
+    ]
+    
+    # Get events for this market
+    market_events = events_module.get_events_for_market(city, state, custom_events_list)
+    
+    # Convert to response format
+    events_response = [
+        EventResponse(
+            id=e.id,
+            name=e.name,
+            city=e.city,
+            state=e.state,
+            start_date=e.start_date.isoformat(),
+            end_date=e.end_date.isoformat(),
+            event_type=e.event_type.value if hasattr(e.event_type, 'value') else e.event_type,
+            demand_multiplier=e.demand_multiplier,
+            recurrence=e.recurrence.value if hasattr(e.recurrence, 'value') else e.recurrence,
+            description=e.description,
+            affects_radius_miles=e.affects_radius_miles,
+            is_custom=e.is_custom,
+            days_until=e.days_until,
+            urgency=e.urgency_level
+        )
+        for e in market_events
+    ]
+    
+    # Calculate stats
+    highest_multiplier = max((e.demand_multiplier for e in market_events), default=1.0)
+    upcoming_events = [e for e in market_events if e.days_until >= 0]
+    nearest_days = min((e.days_until for e in upcoming_events), default=None)
+    
+    return MarketEventsResponse(
+        city=city,
+        state=state,
+        events=events_response,
+        total_events=len(events_response),
+        highest_demand_multiplier=highest_multiplier,
+        nearest_event_days=nearest_days
+    )
+
+
+@app.post("/api/events", response_model=EventResponse)
+def create_custom_event(
+    event: EventCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Create a custom event for tracking.
+    """
+    from datetime import date as date_type
+    
+    # Create the custom event
+    db_event = CustomEvent(
+        name=event.name,
+        city=event.city,
+        state=event.state,
+        start_date=event.start_date,
+        end_date=event.end_date,
+        event_type=event.event_type,
+        demand_multiplier=event.demand_multiplier,
+        recurrence=event.recurrence,
+        description=event.description,
+        affects_radius_miles=event.affects_radius_miles
+    )
+    
+    db.add(db_event)
+    db.commit()
+    db.refresh(db_event)
+    
+    # Calculate days until
+    today = date_type.today()
+    start = db_event.start_date.date() if hasattr(db_event.start_date, 'date') else db_event.start_date
+    days_until = (start - today).days
+    
+    # Determine urgency
+    if days_until < 0:
+        urgency = "past"
+    elif days_until < 90:
+        urgency = "urgent"
+    elif days_until < 180:
+        urgency = "high"
+    elif days_until < 365:
+        urgency = "medium"
+    else:
+        urgency = "strategic"
+    
+    return EventResponse(
+        id=db_event.id,
+        name=db_event.name,
+        city=db_event.city,
+        state=db_event.state,
+        start_date=start.isoformat() if hasattr(start, 'isoformat') else str(start),
+        end_date=(db_event.end_date.date() if hasattr(db_event.end_date, 'date') else db_event.end_date).isoformat(),
+        event_type=db_event.event_type,
+        demand_multiplier=db_event.demand_multiplier,
+        recurrence=db_event.recurrence,
+        description=db_event.description or "",
+        affects_radius_miles=db_event.affects_radius_miles,
+        is_custom=True,
+        days_until=days_until,
+        urgency=urgency
+    )
+
+
+@app.delete("/api/events/{event_id}")
+def delete_custom_event(
+    event_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a custom event. Cannot delete curated events.
+    """
+    event = db.query(CustomEvent).filter(CustomEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Custom event not found")
+    
+    db.delete(event)
+    db.commit()
+    
+    return {"message": f"Event '{event.name}' deleted successfully"}
+
+
+@app.get("/api/events/for-user-markets")
+def get_events_for_user_markets(db: Session = Depends(get_db)):
+    """
+    Get all events affecting markets that the user has configured.
+    Returns events grouped by urgency level.
+    """
+    # Get all user's configured cities
+    cities = db.query(City).all()
+    if not cities:
+        return {
+            "urgent": [],
+            "high": [],
+            "medium": [],
+            "strategic": [],
+            "total_events": 0,
+            "markets_affected": 0
+        }
+    
+    # Get custom events
+    custom_events_db = db.query(CustomEvent).all()
+    custom_events_list = [
+        {
+            "id": ce.id,
+            "name": ce.name,
+            "city": ce.city,
+            "state": ce.state,
+            "start_date": ce.start_date.date() if hasattr(ce.start_date, 'date') else ce.start_date,
+            "end_date": ce.end_date.date() if hasattr(ce.end_date, 'date') else ce.end_date,
+            "event_type": ce.event_type,
+            "demand_multiplier": ce.demand_multiplier,
+            "recurrence": ce.recurrence,
+            "description": ce.description or "",
+            "affects_radius_miles": ce.affects_radius_miles
+        }
+        for ce in custom_events_db
+    ]
+    
+    # Collect events for all user markets
+    all_market_events = []
+    affected_markets = set()
+    
+    for city in cities:
+        market_events = events_module.get_events_for_market(city.city, city.state, custom_events_list)
+        if market_events:
+            affected_markets.add(f"{city.city}, {city.state}")
+            for e in market_events:
+                all_market_events.append(e)
+    
+    # Remove duplicates (same event affecting multiple nearby markets)
+    seen = set()
+    unique_events = []
+    for e in all_market_events:
+        key = (e.name, e.start_date.isoformat())
+        if key not in seen:
+            seen.add(key)
+            unique_events.append(e)
+    
+    # Group by urgency
+    result = {
+        "urgent": [],
+        "high": [],
+        "medium": [],
+        "strategic": [],
+        "past": []
+    }
+    
+    for e in unique_events:
+        event_data = {
+            "id": e.id,
+            "name": e.name,
+            "city": e.city,
+            "state": e.state,
+            "start_date": e.start_date.isoformat(),
+            "end_date": e.end_date.isoformat(),
+            "event_type": e.event_type.value if hasattr(e.event_type, 'value') else e.event_type,
+            "demand_multiplier": e.demand_multiplier,
+            "days_until": e.days_until,
+            "description": e.description,
+            "is_custom": e.is_custom
+        }
+        result[e.urgency_level].append(event_data)
+    
+    # Remove past events from count
+    del result["past"]
+    
+    return {
+        **result,
+        "total_events": len(unique_events),
+        "markets_affected": len(affected_markets)
+    }
+
+
 # ==================== AI Investment Suggestions ====================
 
 @app.post("/api/ai/investment-suggestions")
 async def get_investment_suggestions(db: Session = Depends(get_db)):
     """
     Generate AI-powered investment suggestions based on all available data.
-    Considers ROI, upcoming events (FIFA 2026), market conditions, and arbitrage potential.
+    
+    Enhanced to consider:
+    - Curated event database (sports, conferences, festivals, holidays)
+    - User-defined custom events
+    - AI dynamic research on market trends and upcoming events
+    - ROI analysis and market conditions
     """
+    import json
+    
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key:
         raise HTTPException(
@@ -3092,16 +3448,47 @@ async def get_investment_suggestions(db: Session = Depends(get_db)):
             "suggestions": "No cities configured yet. Add some cities to analyze investment opportunities.",
             "top_opportunities": [],
             "event_opportunities": [],
-            "warnings": ["No data available for analysis"]
+            "events_by_urgency": {"urgent": [], "high": [], "medium": [], "strategic": []},
+            "warnings": ["No data available for analysis"],
+            "markets_analyzed": 0,
+            "total_data_points": 0
         }
     
-    # Get all AirDNA data
+    # Get all AirDNA/Airbtics data
     airdna_data = db.query(AirDNAData).all()
     
-    # Build market summaries
+    # Get custom events from database
+    custom_events_db = db.query(CustomEvent).all()
+    custom_events_list = [
+        {
+            "id": ce.id,
+            "name": ce.name,
+            "city": ce.city,
+            "state": ce.state,
+            "start_date": ce.start_date.date() if hasattr(ce.start_date, 'date') else ce.start_date,
+            "end_date": ce.end_date.date() if hasattr(ce.end_date, 'date') else ce.end_date,
+            "event_type": ce.event_type,
+            "demand_multiplier": ce.demand_multiplier,
+            "recurrence": ce.recurrence,
+            "description": ce.description or "",
+            "affects_radius_miles": ce.affects_radius_miles
+        }
+        for ce in custom_events_db
+    ]
+    
+    # Build market summaries with event data
     market_summaries = []
+    markets_with_events = []
+    all_relevant_events = []
+    
     for city in cities:
-        city_airdna = [a for a in airdna_data if a.city.lower() == city.city.lower() and a.state.lower() == city.state.lower()]
+        # Get revenue data
+        city_airdna = db.query(AirDNAData).filter(
+            AirDNAData.city_id == city.id
+        ).all()
+        
+        # Get events for this market
+        market_events = events_module.get_events_for_market(city.city, city.state, custom_events_list)
         
         if city_airdna:
             revenues = [a.average_annual_revenue for a in city_airdna if a.average_annual_revenue]
@@ -3110,7 +3497,7 @@ async def get_investment_suggestions(db: Session = Depends(get_db)):
             
             avg_revenue = sum(revenues) / len(revenues) if revenues else 0
             
-            market_summaries.append({
+            market_data = {
                 "city": city.city,
                 "state": city.state,
                 "avg_annual_revenue": round(avg_revenue),
@@ -3119,59 +3506,100 @@ async def get_investment_suggestions(db: Session = Depends(get_db)):
                 "data_sources": list(sources),
                 "has_pool_data": any(a.has_pool is not None for a in city_airdna),
                 "has_waterfront_data": any(a.has_waterfront is not None for a in city_airdna),
-            })
+                "events": []
+            }
+            
+            # Add event info to market data
+            if market_events:
+                for event in market_events:
+                    event_info = {
+                        "name": event.name,
+                        "dates": f"{event.start_date.strftime('%b %d')} - {event.end_date.strftime('%b %d, %Y')}",
+                        "days_until": event.days_until,
+                        "urgency": event.urgency_level,
+                        "demand_multiplier": event.demand_multiplier,
+                        "type": event.event_type.value if hasattr(event.event_type, 'value') else event.event_type
+                    }
+                    market_data["events"].append(event_info)
+                    all_relevant_events.append({**event_info, "city": city.city, "state": city.state})
+                markets_with_events.append(market_data)
+            
+            market_summaries.append(market_data)
     
-    # Known upcoming events that affect STR demand
-    upcoming_events = """
-    MAJOR UPCOMING EVENTS (2026):
-    - FIFA World Cup 2026 (June-July 2026): Host cities include:
-      * New York/New Jersey, Los Angeles, Dallas, Houston, Atlanta, Miami, 
-      * Philadelphia, Seattle, San Francisco, Kansas City, Boston
-      * These cities will see MASSIVE demand spikes during the tournament
-      * Investment window is NOW - properties need to be acquired and stabilized before June 2026
+    # Format events for the prompt
+    events_text = events_module.format_events_for_prompt(
+        [e for events in [events_module.get_events_for_market(c.city, c.state, custom_events_list) for c in cities] for e in events]
+    )
     
-    - Other factors to consider:
-      * Major convention cities (Las Vegas, Orlando, San Diego) have year-round demand
-      * College towns see seasonal spikes during graduation, football season
-      * Beach/resort destinations have summer peaks
-      * Ski resort areas have winter peaks
-    """
+    # Remove duplicate events
+    seen_events = set()
+    unique_events = []
+    for e in all_relevant_events:
+        key = (e["name"], e.get("city", ""))
+        if key not in seen_events:
+            seen_events.add(key)
+            unique_events.append(e)
     
-    # Build the prompt
+    # Group events by urgency for response
+    events_by_urgency = {"urgent": [], "high": [], "medium": [], "strategic": []}
+    for e in unique_events:
+        urgency = e.get("urgency", "medium")
+        if urgency in events_by_urgency:
+            events_by_urgency[urgency].append(e)
+    
+    # Get today's date dynamically
+    today = datetime.now()
+    today_str = today.strftime("%B %d, %Y")
+    
+    # Build the enhanced prompt
     prompt = f"""You are an expert real estate investment analyst specializing in short-term rental (STR) arbitrage.
 
-TODAY'S DATE: January 24, 2026
+TODAY'S DATE: {today_str}
 
-{upcoming_events}
+=== KNOWN UPCOMING EVENTS AFFECTING USER'S MARKETS ===
+{events_text if events_text != "No major upcoming events identified." else "No major events in user's current markets from our database."}
 
-MARKET DATA FROM USER'S DATABASE:
+=== MARKET REVENUE DATA FROM USER'S DATABASE ===
 {json.dumps(market_summaries, indent=2)}
 
-Based on this data, provide investment suggestions with a STRONG focus on ROI and timing. Consider:
+=== YOUR ANALYSIS TASKS ===
 
-1. **FIFA 2026 URGENCY**: The World Cup starts in ~5 months. For host cities in the data, emphasize:
-   - Time is running out to acquire and stabilize properties
-   - Expected revenue multipliers during the tournament (2-4x normal)
-   - Quick ROI potential if acquired NOW
+1. **DYNAMIC EVENT RESEARCH**: 
+   Based on your knowledge, identify ANY additional upcoming events in these cities that could affect STR demand:
+   - Major concerts, tours, or entertainment events
+   - Professional and college sports (playoffs, championships, bowl games)
+   - Business conferences and trade shows  
+   - Political events (debates, conventions)
+   - Cultural festivals and celebrations
+   - Economic developments (new Amazon HQ, tech expansions, etc.)
+   - Seasonal factors (spring break destinations, ski season, beach season)
 
-2. **ROI Analysis**: For each promising market:
-   - Estimated annual revenue potential
-   - Typical rental costs for arbitrage
-   - Expected profit margins
+2. **EVENT-DRIVEN OPPORTUNITIES**:
+   For each market with upcoming events:
+   - Calculate potential revenue during the event period (use demand multiplier)
+   - Estimate how soon properties need to be acquired to capitalize
+   - Rate the opportunity: URGENT (<3 months), HIGH (3-6 months), MEDIUM (6-12 months)
+
+3. **ROI ANALYSIS**: For each promising market:
+   - Estimated annual revenue potential (from data provided)
+   - Expected profit margins for arbitrage (revenue minus typical rent costs)
    - Time to break even
+   - Risk factors
 
-3. **Risk Assessment**:
-   - Which markets have the best data confidence?
-   - Where are the highest and lowest risk opportunities?
-
-4. **Actionable Recommendations**:
-   - Top 3 markets to prioritize RIGHT NOW
+4. **ACTIONABLE RECOMMENDATIONS**:
+   - Top 3-5 markets to prioritize RIGHT NOW and WHY
    - Specific bedroom counts that show best margins
-   - Any markets to avoid
+   - Markets to avoid and why
+   - Time-sensitive opportunities that need immediate action
 
-Format your response as a clear, actionable investment briefing. Be specific with numbers.
-Include a "TIME SENSITIVITY" section for FIFA-related opportunities.
-Keep the response concise but comprehensive (aim for 400-600 words)."""
+Format your response as a clear, actionable investment briefing with the following sections:
+- **URGENT OPPORTUNITIES** (events < 3 months away)
+- **HIGH PRIORITY** (events 3-6 months away)  
+- **STRATEGIC PLAYS** (longer-term opportunities)
+- **MARKET RANKINGS** (top markets by ROI potential)
+- **ACTION ITEMS** (specific next steps)
+
+Be specific with numbers, dates, and reasoning. Keep the response comprehensive but focused (500-800 words)."""
 
     try:
         response = client.chat.completions.create(
@@ -3179,14 +3607,22 @@ Keep the response concise but comprehensive (aim for 400-600 words)."""
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an expert real estate investment analyst. Provide clear, data-driven advice focused on ROI and actionable insights. Be direct and specific with recommendations."
+                    "content": """You are an expert real estate investment analyst specializing in short-term rental (STR) arbitrage.
+
+Your expertise includes:
+- Deep knowledge of major events that drive STR demand (sports, conferences, festivals)
+- Understanding of STR market dynamics and seasonality
+- ROI and profitability analysis for rental arbitrage
+- Risk assessment for real estate investments
+
+Provide clear, data-driven advice focused on ROI and actionable insights. Be direct and specific with recommendations. Always consider timing and urgency in your analysis."""
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            max_tokens=1500,
+            max_tokens=2000,
             temperature=0.7,
         )
         
@@ -3199,21 +3635,21 @@ Keep the response concise but comprehensive (aim for 400-600 words)."""
             reverse=True
         )[:5]
         
-        # FIFA host cities in our data
-        fifa_cities = ["New York", "Los Angeles", "Dallas", "Houston", "Atlanta", "Miami", 
-                       "Philadelphia", "Seattle", "San Francisco", "Kansas City", "Boston"]
-        event_opportunities = [
-            m for m in market_summaries 
-            if any(fc.lower() in m["city"].lower() for fc in fifa_cities)
-        ]
+        # Markets with events (sorted by nearest event)
+        event_opportunities = sorted(
+            markets_with_events,
+            key=lambda x: min([e["days_until"] for e in x["events"]] or [9999])
+        )
         
         return {
             "suggestions": suggestions,
             "top_opportunities": top_opportunities,
             "event_opportunities": event_opportunities,
+            "events_by_urgency": events_by_urgency,
             "generated_at": datetime.now().isoformat(),
             "markets_analyzed": len(market_summaries),
-            "total_data_points": len(airdna_data)
+            "total_data_points": len(airdna_data),
+            "total_events_tracked": len(unique_events)
         }
         
     except Exception as e:

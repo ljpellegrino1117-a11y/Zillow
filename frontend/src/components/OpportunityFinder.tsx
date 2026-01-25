@@ -21,18 +21,23 @@ import {
   RefreshCw,
   Download,
   FileText,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Calendar,
+  Zap,
+  Clock
 } from 'lucide-react';
 import { 
   findOpportunities, 
   getRealtorApiStatus,
   getCities,
   getAirbticsCityStatuses,
+  getEventsForUserMarkets,
   OpportunityListing, 
   OpportunitySearchResponse,
   RealtorApiStatus,
   City,
-  AirbticsCityStatus
+  AirbticsCityStatus,
+  UserMarketEventsResponse
 } from '@/lib/api';
 
 interface Props {
@@ -70,8 +75,12 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
   const [apiStatus, setApiStatus] = useState<RealtorApiStatus | null>(null);
   
   const [expandedOpportunity, setExpandedOpportunity] = useState<number | null>(null);
+  
+  // Events state
+  const [marketEvents, setMarketEvents] = useState<UserMarketEventsResponse | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(false);
 
-  // Load cities and data status on mount
+  // Load cities, data status, and events on mount
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -94,6 +103,17 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
         if (apiStatusData) {
           setApiStatus(apiStatusData);
         }
+        
+        // Load events for user's markets
+        try {
+          setEventsLoading(true);
+          const events = await getEventsForUserMarkets();
+          setMarketEvents(events);
+        } catch (err) {
+          console.error('Failed to load events:', err);
+        } finally {
+          setEventsLoading(false);
+        }
       } catch (err) {
         console.error('Failed to load data:', err);
       }
@@ -101,6 +121,45 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
     
     loadData();
   }, [refreshTrigger]);
+  
+  // Helper to check if a city has upcoming events
+  const getCityEvents = (city: string, state: string) => {
+    if (!marketEvents) return null;
+    
+    const cityLower = city.toLowerCase();
+    const stateLower = state.toLowerCase();
+    
+    // Check all urgency levels for events in this city
+    const allEvents = [
+      ...marketEvents.urgent,
+      ...marketEvents.high,
+      ...marketEvents.medium,
+      ...marketEvents.strategic
+    ];
+    
+    const cityEvents = allEvents.filter(e => 
+      e.city.toLowerCase() === cityLower && 
+      e.state.toLowerCase() === stateLower
+    );
+    
+    if (cityEvents.length === 0) return null;
+    
+    // Get the most urgent event
+    const urgentEvent = marketEvents.urgent.find(e => 
+      e.city.toLowerCase() === cityLower && e.state.toLowerCase() === stateLower
+    );
+    const highEvent = marketEvents.high.find(e => 
+      e.city.toLowerCase() === cityLower && e.state.toLowerCase() === stateLower
+    );
+    
+    return {
+      events: cityEvents,
+      mostUrgent: urgentEvent || highEvent || cityEvents[0],
+      count: cityEvents.length,
+      hasUrgent: !!urgentEvent,
+      hasHigh: !!highEvent
+    };
+  };
   
   // Helper to get city data info
   const getCityDataInfo = (cityStr: string) => {
@@ -863,9 +922,80 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
               <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-4 border border-indigo-100">
                 <div className="flex items-center gap-2 mb-2">
                   <Sparkles className="h-4 w-4 text-indigo-600" />
-                  <span className="font-medium text-indigo-900">AI Analysis</span>
+                  <span className="font-medium text-indigo-900">AI Quick Analysis</span>
                 </div>
                 <p className="text-gray-700 text-sm">{results.ai_analysis}</p>
+              </div>
+            )}
+            
+            {/* Events Summary Panel */}
+            {marketEvents && marketEvents.total_events > 0 && (
+              <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-lg p-4 border border-orange-200">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-5 w-5 text-orange-600" />
+                    <span className="font-semibold text-orange-900">
+                      Upcoming Events ({marketEvents.total_events} in {marketEvents.markets_affected} markets)
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="space-y-3">
+                  {/* Urgent Events */}
+                  {marketEvents.urgent.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1 text-sm font-medium text-red-800 mb-1">
+                        <Zap className="h-3.5 w-3.5" />
+                        URGENT (&lt;3 months)
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {marketEvents.urgent.slice(0, 5).map((event, idx) => (
+                          <span 
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"
+                            title={event.description}
+                          >
+                            {event.name} ({event.city})
+                            <span className="text-red-600">
+                              {event.days_until}d | {event.demand_multiplier}x
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* High Priority Events */}
+                  {marketEvents.high.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1 text-sm font-medium text-orange-800 mb-1">
+                        <Clock className="h-3.5 w-3.5" />
+                        HIGH PRIORITY (3-6 months)
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {marketEvents.high.slice(0, 5).map((event, idx) => (
+                          <span 
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium"
+                            title={event.description}
+                          >
+                            {event.name} ({event.city})
+                            <span className="text-orange-600">
+                              {event.days_until}d | {event.demand_multiplier}x
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Medium/Strategic Events (collapsed) */}
+                  {(marketEvents.medium.length > 0 || marketEvents.strategic.length > 0) && (
+                    <div className="text-xs text-gray-600">
+                      +{marketEvents.medium.length + marketEvents.strategic.length} more events 6-12+ months out
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -892,7 +1022,36 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                     
                     {/* Address & Details */}
                     <div>
-                      <h4 className="font-semibold text-gray-900">{opp.address}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-semibold text-gray-900">{opp.address}</h4>
+                        {/* Event Impact Badge */}
+                        {(() => {
+                          const eventInfo = getCityEvents(opp.city, opp.state);
+                          if (!eventInfo) return null;
+                          
+                          const mostUrgent = eventInfo.mostUrgent;
+                          const urgencyColors = {
+                            urgent: 'bg-red-100 text-red-800 border-red-200',
+                            high: 'bg-orange-100 text-orange-800 border-orange-200',
+                            medium: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+                            strategic: 'bg-blue-100 text-blue-800 border-blue-200'
+                          };
+                          const color = urgencyColors[mostUrgent.urgency as keyof typeof urgencyColors] || urgencyColors.medium;
+                          
+                          return (
+                            <span 
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${color}`}
+                              title={`${mostUrgent.name} (${mostUrgent.demand_multiplier}x demand)`}
+                            >
+                              <Calendar className="h-3 w-3" />
+                              {mostUrgent.urgency === 'urgent' ? (
+                                <Zap className="h-3 w-3" />
+                              ) : null}
+                              {eventInfo.count} event{eventInfo.count > 1 ? 's' : ''}
+                            </span>
+                          );
+                        })()}
+                      </div>
                       <div className="flex items-center gap-3 text-sm text-gray-600">
                         <span className="flex items-center gap-1">
                           <MapPin className="h-3.5 w-3.5" />
