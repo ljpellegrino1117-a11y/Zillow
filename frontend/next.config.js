@@ -2,7 +2,7 @@
 const nextConfig = {
   async rewrites() {
     // Use environment variable for backend URL in production, localhost for development
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8001';
     return [
       {
         source: '/api/:path*',
