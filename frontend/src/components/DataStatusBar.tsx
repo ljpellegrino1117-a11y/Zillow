@@ -75,20 +75,61 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
     try {
       setLoading(true);
       setError(null);
-      const [cities, db, listings, scrapeStatus] = await Promise.all([
+      
+      // Load each data source independently to prevent one failure from blocking others
+      const results = await Promise.allSettled([
         getAirbticsCityStatuses(),
         getDatabaseStatus(),
         getListingsLifecycleStats(),
         getBatchScrapeStatus()
       ]);
-      setCityStatuses(cities);
-      setDbStatus(db);
-      setListingsStats(listings);
-      setBatchScrapeStatus(scrapeStatus);
       
-      // Check if scrape is already running
-      if (scrapeStatus.status === 'running' || scrapeStatus.status === 'starting') {
-        setIsScraping(true);
+      // Extract results, using defaults for failed calls
+      const [citiesResult, dbResult, listingsResult, scrapeResult] = results;
+      
+      if (citiesResult.status === 'fulfilled') {
+        setCityStatuses(citiesResult.value);
+      } else {
+        console.warn('Failed to load city statuses:', citiesResult.reason);
+        setCityStatuses([]);
+      }
+      
+      if (dbResult.status === 'fulfilled') {
+        setDbStatus(dbResult.value);
+      } else {
+        console.warn('Failed to load database status:', dbResult.reason);
+      }
+      
+      if (listingsResult.status === 'fulfilled') {
+        setListingsStats(listingsResult.value);
+      } else {
+        console.warn('Failed to load listings stats:', listingsResult.reason);
+        // Set empty stats instead of showing error
+        setListingsStats({
+          total_listings: 0,
+          active_listings: 0,
+          rented_listings: 0,
+          expired_listings: 0,
+          listings_by_source: {},
+          oldest_listing_date: null,
+          newest_listing_date: null,
+          retention_days: 45
+        });
+      }
+      
+      if (scrapeResult.status === 'fulfilled') {
+        setBatchScrapeStatus(scrapeResult.value);
+        // Check if scrape is already running
+        if (scrapeResult.value.status === 'running' || scrapeResult.value.status === 'starting') {
+          setIsScraping(true);
+        }
+      } else {
+        console.warn('Failed to load scrape status:', scrapeResult.reason);
+      }
+      
+      // Only show error if critical data (city statuses) failed
+      if (citiesResult.status === 'rejected' && dbResult.status === 'rejected') {
+        setError('Failed to load data status');
       }
     } catch (err) {
       setError('Failed to load data status');

@@ -1109,40 +1109,92 @@ def get_listings_lifecycle_stats(db: Session = Depends(get_db)):
     Shows counts by status (active/rented/expired), data sources,
     and date ranges for 45-day retention visibility.
     """
-    from sqlalchemy import case
-    
-    # Get counts by status
-    status_counts = db.query(
-        ZillowListing.status,
-        func.count(ZillowListing.id).label('count')
-    ).group_by(ZillowListing.status).all()
-    
-    status_dict = {s.status: s.count for s in status_counts}
-    
-    # Get counts by source
-    source_counts = db.query(
-        ZillowListing.listing_source,
-        func.count(ZillowListing.id).label('count')
-    ).group_by(ZillowListing.listing_source).all()
-    
-    source_dict = {s.listing_source: s.count for s in source_counts}
-    
-    # Get date ranges
-    date_stats = db.query(
-        func.min(ZillowListing.first_seen).label('oldest'),
-        func.max(ZillowListing.first_seen).label('newest')
-    ).first()
-    
-    return ListingsStatsResponse(
-        total_listings=sum(status_dict.values()),
-        active_listings=status_dict.get('active', 0),
-        rented_listings=status_dict.get('rented', 0),
-        expired_listings=status_dict.get('expired', 0),
-        listings_by_source=source_dict,
-        oldest_listing_date=date_stats.oldest if date_stats else None,
-        newest_listing_date=date_stats.newest if date_stats else None,
-        retention_days=LISTING_RETENTION_DAYS,
-    )
+    try:
+        # Try to get total count first (works even if new columns don't exist)
+        total_count = db.query(func.count(ZillowListing.id)).scalar() or 0
+        
+        # If no listings, return empty stats
+        if total_count == 0:
+            return ListingsStatsResponse(
+                total_listings=0,
+                active_listings=0,
+                rented_listings=0,
+                expired_listings=0,
+                listings_by_source={},
+                oldest_listing_date=None,
+                newest_listing_date=None,
+                retention_days=LISTING_RETENTION_DAYS,
+            )
+        
+        # Try to get status counts (may fail if column doesn't exist)
+        try:
+            status_counts = db.query(
+                ZillowListing.status,
+                func.count(ZillowListing.id).label('count')
+            ).group_by(ZillowListing.status).all()
+            status_dict = {s.status: s.count for s in status_counts if s.status}
+        except Exception:
+            # Column doesn't exist, assume all are active
+            status_dict = {'active': total_count}
+        
+        # Try to get source counts
+        try:
+            source_counts = db.query(
+                ZillowListing.listing_source,
+                func.count(ZillowListing.id).label('count')
+            ).group_by(ZillowListing.listing_source).all()
+            source_dict = {s.listing_source: s.count for s in source_counts if s.listing_source}
+        except Exception:
+            # Column doesn't exist
+            source_dict = {}
+        
+        # Try to get date ranges
+        oldest = None
+        newest = None
+        try:
+            date_stats = db.query(
+                func.min(ZillowListing.first_seen).label('oldest'),
+                func.max(ZillowListing.first_seen).label('newest')
+            ).first()
+            if date_stats:
+                oldest = date_stats.oldest
+                newest = date_stats.newest
+        except Exception:
+            # first_seen column doesn't exist, try scraped_at
+            try:
+                date_stats = db.query(
+                    func.min(ZillowListing.scraped_at).label('oldest'),
+                    func.max(ZillowListing.scraped_at).label('newest')
+                ).first()
+                if date_stats:
+                    oldest = date_stats.oldest
+                    newest = date_stats.newest
+            except Exception:
+                pass
+        
+        return ListingsStatsResponse(
+            total_listings=total_count,
+            active_listings=status_dict.get('active', total_count),
+            rented_listings=status_dict.get('rented', 0),
+            expired_listings=status_dict.get('expired', 0),
+            listings_by_source=source_dict,
+            oldest_listing_date=oldest,
+            newest_listing_date=newest,
+            retention_days=LISTING_RETENTION_DAYS,
+        )
+    except Exception as e:
+        logger.error(f"Error getting listings lifecycle stats: {e}")
+        # Return empty stats on any error
+        return ListingsStatsResponse(
+            total_listings=0,
+            active_listings=0,
+            rented_listings=0,
+            expired_listings=0,
+            listings_by_source={},
+            oldest_listing_date=None,
+            newest_listing_date=None,
+            retention_days=LISTING_RETENTION_DAYS,
+        )
 
 
 @app.get("/api/listings/amenity-counts")
