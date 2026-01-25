@@ -2750,6 +2750,40 @@ def import_database(data: dict, db: Session = Depends(get_db)):
     }
 
 
+@app.post("/api/database/reset-schema")
+def reset_database_schema(confirm: bool = Query(False)):
+    """
+    Reset database schema by dropping and recreating all tables.
+    WARNING: This will delete ALL data.
+    
+    Pass ?confirm=true to execute.
+    """
+    if not confirm:
+        return {
+            "status": "warning",
+            "message": "This will DELETE ALL DATA and recreate tables. Pass ?confirm=true to proceed.",
+            "action_required": "Add ?confirm=true to the URL"
+        }
+    
+    try:
+        # Drop all tables
+        Base.metadata.drop_all(bind=engine)
+        
+        # Recreate all tables with current schema
+        Base.metadata.create_all(bind=engine)
+        
+        return {
+            "status": "success",
+            "message": "Database schema reset successfully. All tables recreated.",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
 @app.on_event("startup")
 async def startup_tasks():
     """Run cleanup and Airbtics sync on startup"""
