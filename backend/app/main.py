@@ -3127,20 +3127,17 @@ async def get_realtor_api_status():
 @app.get("/api/airbtics/data-status")
 async def get_airbtics_data_status(db: Session = Depends(get_db)):
     """
-    Get comprehensive status of Airbtics data in the database.
+    Get comprehensive status of STR revenue data in the database.
     Returns markets available for nationwide search and data freshness info.
+    Includes ALL sources: manual, airbtics, screenshot.
     """
     from datetime import datetime, timedelta
     
-    # Get all Airbtics data entries
-    all_data = db.query(AirDNAData).filter(
-        AirDNAData.source == 'airbtics'
-    ).all()
+    # Get ALL STR revenue data entries (not just airbtics source)
+    all_data = db.query(AirDNAData).all()
     
-    # Get unique cities with Airbtics data
-    cities_with_data = db.query(City).join(AirDNAData).filter(
-        AirDNAData.source == 'airbtics'
-    ).distinct().all()
+    # Get unique cities with ANY STR revenue data
+    cities_with_data = db.query(City).join(AirDNAData).distinct().all()
     
     # Calculate data freshness
     six_months_ago = datetime.utcnow() - timedelta(days=180)
@@ -3157,14 +3154,15 @@ async def get_airbtics_data_status(db: Session = Depends(get_db)):
     markets = []
     for city in cities_with_data:
         city_data = db.query(AirDNAData).filter(
-            AirDNAData.city_id == city.id,
-            AirDNAData.source == 'airbtics'
+            AirDNAData.city_id == city.id
         ).all()
         
         bedroom_ranges = set()
         latest_fetch = None
+        sources = set()
         for d in city_data:
             bedroom_ranges.add(f"{d.bedrooms_min}-{d.bedrooms_max}")
+            sources.add(d.source or 'manual')
             if d.last_api_fetch:
                 if not latest_fetch or d.last_api_fetch > latest_fetch:
                     latest_fetch = d.last_api_fetch
@@ -3176,6 +3174,7 @@ async def get_airbtics_data_status(db: Session = Depends(get_db)):
             "state": city.state,
             "entries_count": len(city_data),
             "bedroom_ranges": list(bedroom_ranges),
+            "sources": list(sources),
             "last_fetch": latest_fetch.isoformat() if latest_fetch else None,
             "is_fresh": is_fresh,
             "needs_refresh": not is_fresh
