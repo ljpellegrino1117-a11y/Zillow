@@ -27,10 +27,12 @@ import {
   findOpportunities, 
   getRealtorApiStatus,
   getCities,
+  getAirbticsCityStatuses,
   OpportunityListing, 
   OpportunitySearchResponse,
   RealtorApiStatus,
-  City
+  City,
+  AirbticsCityStatus
 } from '@/lib/api';
 
 interface Props {
@@ -47,6 +49,7 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
   // Cities mode state
   const [cities, setCities] = useState<City[]>([]);
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
+  const [cityDataStatus, setCityDataStatus] = useState<Record<string, AirbticsCityStatus>>({});
   
   // City radius mode state
   const [radiusCity, setRadiusCity] = useState('');
@@ -68,29 +71,54 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
   
   const [expandedOpportunity, setExpandedOpportunity] = useState<number | null>(null);
 
-  // Load cities on mount
+  // Load cities and data status on mount
   useEffect(() => {
-    const loadCities = async () => {
+    const loadData = async () => {
       try {
-        const citiesData = await getCities();
+        const [citiesData, cityStatuses, apiStatusData] = await Promise.all([
+          getCities(),
+          getAirbticsCityStatuses(),
+          getRealtorApiStatus().catch(() => null)
+        ]);
+        
         setCities(citiesData);
+        
+        // Build lookup map for city data status
+        const statusMap: Record<string, AirbticsCityStatus> = {};
+        cityStatuses.forEach(status => {
+          const key = `${status.city}, ${status.state}`;
+          statusMap[key] = status;
+        });
+        setCityDataStatus(statusMap);
+        
+        if (apiStatusData) {
+          setApiStatus(apiStatusData);
+        }
       } catch (err) {
-        console.error('Failed to load cities:', err);
+        console.error('Failed to load data:', err);
       }
     };
     
-    const checkApiStatus = async () => {
-      try {
-        const status = await getRealtorApiStatus();
-        setApiStatus(status);
-      } catch (err) {
-        console.error('Failed to check API status:', err);
-      }
-    };
-    
-    loadCities();
-    checkApiStatus();
+    loadData();
   }, [refreshTrigger]);
+  
+  // Helper to get city data info
+  const getCityDataInfo = (cityStr: string) => {
+    const status = cityDataStatus[cityStr];
+    if (!status) return { hasData: false, entries: 0 };
+    return {
+      hasData: status.has_airbtics_data,
+      entries: status.entries_count,
+      needsRefresh: status.needs_refresh
+    };
+  };
+  
+  // Count cities with/without data
+  const selectedWithData = selectedCities.filter(c => getCityDataInfo(c).hasData).length;
+  const selectedWithoutData = selectedCities.length - selectedWithData;
+  
+  // Count total markets with data (for nationwide search info)
+  const totalMarketsWithData = Object.values(cityDataStatus).filter(s => s.has_airbtics_data).length;
 
   const handleSearch = async () => {
     // Validate based on search mode
@@ -523,43 +551,113 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
         {/* Mode-specific inputs */}
         {searchMode === 'nationwide' && (
           <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-            <div className="flex items-center gap-2 text-blue-700">
-              <Sparkles className="h-5 w-5" />
-              <span className="font-medium">Nationwide Search</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-blue-700">
+                <Sparkles className="h-5 w-5" />
+                <span className="font-medium">Nationwide Search</span>
+              </div>
+              <span className={`px-2 py-1 rounded text-sm font-medium ${
+                totalMarketsWithData > 0 
+                  ? 'bg-green-100 text-green-700' 
+                  : 'bg-red-100 text-red-700'
+              }`}>
+                {totalMarketsWithData} markets with data
+              </span>
             </div>
             <p className="text-sm text-blue-600 mt-1">
-              Will search all markets that have Airbtics revenue data stored. This may take longer for large datasets.
+              {totalMarketsWithData > 0 
+                ? `Will search ${totalMarketsWithData} markets that have Airbtics revenue data.`
+                : 'No markets have revenue data yet. Add data in Data Management below.'}
             </p>
           </div>
         )}
 
         {searchMode === 'cities' && (
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Cities
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {cities.map(city => {
-                const cityStr = `${city.city}, ${city.state}`;
-                const isSelected = selectedCities.includes(cityStr);
-                return (
-                  <button
-                    key={city.id}
-                    onClick={() => toggleCity(cityStr)}
-                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                      isSelected
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {city.city}, {city.state}
-                  </button>
-                );
-              })}
-              {cities.length === 0 && (
-                <p className="text-gray-500 text-sm">No cities configured. Add cities first, or use Nationwide search to search all markets with data.</p>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Select Markets to Search
+              </label>
+              {selectedCities.length > 0 && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-gray-500">Selected:</span>
+                  <span className="text-green-600 font-medium">{selectedWithData} with data</span>
+                  {selectedWithoutData > 0 && (
+                    <span className="text-red-600 font-medium">{selectedWithoutData} missing data</span>
+                  )}
+                </div>
               )}
             </div>
+            
+            {/* City Selection Grid */}
+            <div className="border border-gray-200 rounded-lg p-3 max-h-60 overflow-y-auto bg-white">
+              {cities.length > 0 ? (
+                <div className="space-y-1">
+                  {cities.map(city => {
+                    const cityStr = `${city.city}, ${city.state}`;
+                    const isSelected = selectedCities.includes(cityStr);
+                    const dataInfo = getCityDataInfo(cityStr);
+                    
+                    return (
+                      <label
+                        key={city.id}
+                        className={`flex items-center justify-between p-2 rounded cursor-pointer transition-all ${
+                          isSelected 
+                            ? 'bg-blue-50 border border-blue-200' 
+                            : 'hover:bg-gray-50 border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleCity(cityStr)}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className={`font-medium ${isSelected ? 'text-blue-900' : 'text-gray-700'}`}>
+                            {city.city}, {city.state}
+                          </span>
+                        </div>
+                        
+                        {/* Data Status Indicator */}
+                        {dataInfo.hasData ? (
+                          <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                            <CheckCircle className="h-3 w-3" />
+                            {dataInfo.entries} entries
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
+                            <XCircle className="h-3 w-3" />
+                            No data
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-6">
+                  <AlertTriangle className="h-8 w-8 text-yellow-400 mx-auto mb-2" />
+                  <p className="text-gray-600 font-medium">No markets configured</p>
+                  <p className="text-gray-500 text-sm mt-1">
+                    Add cities in Data Management below, or use Nationwide search.
+                  </p>
+                </div>
+              )}
+            </div>
+            
+            {/* Warning for missing data */}
+            {selectedWithoutData > 0 && (
+              <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                <div className="flex items-center gap-2 text-yellow-700">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span>
+                    {selectedWithoutData} selected {selectedWithoutData === 1 ? 'market has' : 'markets have'} no revenue data.
+                    Results will be limited to markets with data.
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -973,30 +1071,73 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
         </div>
       )}
       
-      {/* Empty State */}
+      {/* Empty State - with data awareness */}
       {!results && !loading && (
-        <div className="bg-white/50 rounded-xl p-8 text-center border border-dashed border-blue-200">
-          <TrendingUp className="h-12 w-12 text-blue-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">
-            Ready to Find Deals
-          </h3>
-          <p className="text-gray-600 mb-4">
-            Select cities and click "Find Opportunities" to discover the best rental arbitrage deals.
-          </p>
-          <div className="flex items-center justify-center gap-6 text-sm text-gray-500">
-            <span className="flex items-center gap-1">
-              <Home className="h-4 w-4" />
-              Real listings
-            </span>
-            <span className="flex items-center gap-1">
-              <DollarSign className="h-4 w-4" />
-              Profit calculations
-            </span>
-            <span className="flex items-center gap-1">
-              <Phone className="h-4 w-4" />
-              Agent contact
-            </span>
-          </div>
+        <div className="space-y-4">
+          {/* Warning if no data at all */}
+          {totalMarketsWithData === 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+              <div className="flex items-start gap-4">
+                <div className="bg-yellow-100 p-3 rounded-lg">
+                  <AlertTriangle className="h-6 w-6 text-yellow-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-yellow-800 mb-1">
+                    No Revenue Data Available
+                  </h3>
+                  <p className="text-yellow-700 mb-4">
+                    The Opportunity Finder needs Airbtics revenue data to calculate profits.
+                    Add revenue data to start finding arbitrage opportunities.
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <div className="bg-white rounded-lg p-3 border border-yellow-200">
+                      <div className="font-medium text-gray-900 mb-1">Option 1: Sync Airbtics Data</div>
+                      <p className="text-sm text-gray-600">
+                        Automatically pull revenue data from Airbtics API (requires API credits)
+                      </p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 border border-yellow-200">
+                      <div className="font-medium text-gray-900 mb-1">Option 2: Manual Entry</div>
+                      <p className="text-sm text-gray-600">
+                        Manually enter revenue data from AirDNA screenshots
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-yellow-600 mt-3">
+                    Open "Data Management" below to add revenue data.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Ready state when data exists */}
+          {totalMarketsWithData > 0 && (
+            <div className="bg-white/50 rounded-xl p-8 text-center border border-dashed border-blue-200">
+              <TrendingUp className="h-12 w-12 text-blue-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                Ready to Find Deals
+              </h3>
+              <p className="text-gray-600 mb-4">
+                You have revenue data for <strong>{totalMarketsWithData} markets</strong>.
+                Select cities and click "Find Opportunities" to discover the best rental arbitrage deals.
+              </p>
+              <div className="flex items-center justify-center gap-6 text-sm text-gray-500">
+                <span className="flex items-center gap-1">
+                  <Home className="h-4 w-4" />
+                  Real listings
+                </span>
+                <span className="flex items-center gap-1">
+                  <DollarSign className="h-4 w-4" />
+                  Profit calculations
+                </span>
+                <span className="flex items-center gap-1">
+                  <Phone className="h-4 w-4" />
+                  Agent contact
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
