@@ -79,23 +79,25 @@ export default function SearchResults({ results, isLoading }: SearchResultsProps
 
   const exportToCSV = () => {
     const headers = [
-      'Rank', 'ROI Score', 'Address', 'City', 'State', 'Zip Code', 'Bedrooms', 'Bathrooms', 'Sqft',
-      'Monthly Rent', 'Annual Rent', 'Est. Revenue', 'Est. Expenses', 'Est. Profit', 
+      'Rank', 'Listing Type', 'ROI Score', 'Address', 'City', 'State', 'Zip Code', 'Bedrooms', 'Bathrooms', 'Sqft',
+      'Sale Price', 'Monthly Rent', 'Rent Est. Method', 'Annual Rent', 'Est. Revenue', 'Est. Expenses', 'Est. Profit', 
       'Break-even Occupancy', 'Agent Name', 'Agent Phone', 'Agent Email', 'Agent Company',
-      'Listing URL', 'Has Pool', 'Has Waterfront', 'Has Garage', 'Has Yard',
+      'Listing URL', 'Has Pool', 'Has Waterfront', 'Has Garage', 'Has Yard', 'Has Basement', 'Has Unfinished Basement',
       'Strengths', 'Weaknesses', 'Revenue Source'
     ];
     
     const rows = results.opportunities.map((opp, i) => [
-      i + 1, opp.roi_score, opp.address, opp.city, opp.state, opp.zip_code || '',
+      i + 1, opp.listing_type || 'rental', opp.roi_score, opp.address, opp.city, opp.state, opp.zip_code || '',
       opp.bedrooms, opp.bathrooms || '', opp.sqft || '',
-      opp.monthly_rent, opp.annual_rent, opp.estimated_annual_revenue, 
+      opp.sale_price || '', opp.monthly_rent, opp.rent_estimation_method || '',
+      opp.annual_rent, opp.estimated_annual_revenue, 
       opp.estimated_expenses, opp.estimated_profit,
       `${(opp.break_even_occupancy * 100).toFixed(0)}%`,
       opp.agent_name || '', opp.agent_phone || '', opp.agent_email || '', opp.agent_company || '',
       opp.url || '',
       opp.has_pool ? 'Yes' : 'No', opp.has_waterfront ? 'Yes' : 'No',
       opp.has_garage ? 'Yes' : 'No', opp.has_yard ? 'Yes' : 'No',
+      opp.has_basement ? 'Yes' : 'No', opp.has_unfinished_basement ? 'Yes' : 'No',
       opp.strengths.join('; '), opp.weaknesses.join('; '),
       opp.revenue_source
     ]);
@@ -311,38 +313,60 @@ export default function SearchResults({ results, isLoading }: SearchResultsProps
         </div>
       )}
 
-      {/* Results List */}
-      <div className="space-y-3">
-        {results.opportunities.map((opp, index) => (
+      {/* Separate rentals and for-sale */}
+      {(() => {
+        const rentals = results.opportunities.filter(o => o.listing_type !== 'for_sale');
+        const forSale = results.opportunities.filter(o => o.listing_type === 'for_sale');
+        
+        const renderOpportunity = (opp: OpportunityListing, index: number, globalIndex: number) => (
           <div
-            key={opp.listing_id || index}
-            className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:border-blue-300 transition-colors"
+            key={opp.listing_id || globalIndex}
+            className={`bg-white rounded-xl border overflow-hidden hover:border-blue-300 transition-colors ${
+              opp.listing_type === 'for_sale' ? 'border-purple-200' : 'border-gray-200'
+            }`}
           >
             {/* Main Row */}
             <div
               className="p-4 cursor-pointer"
-              onClick={() => setExpandedId(expandedId === index ? null : index)}
+              onClick={() => setExpandedId(expandedId === globalIndex ? null : globalIndex)}
             >
               <div className="flex items-center gap-4">
                 {/* Rank */}
-                <div className="flex-shrink-0 w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
+                <div className={`flex-shrink-0 w-10 h-10 text-white rounded-full flex items-center justify-center font-bold text-sm ${
+                  opp.listing_type === 'for_sale' ? 'bg-purple-600' : 'bg-blue-600'
+                }`}>
                   #{index + 1}
                 </div>
 
                 {/* Address */}
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-gray-900 truncate">{opp.address}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-gray-900 truncate">{opp.address}</h3>
+                    {opp.listing_type === 'for_sale' && (
+                      <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded">
+                        For Sale
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-gray-500">
                     {opp.city}, {opp.state} • {opp.bedrooms} BR
                     {opp.bathrooms ? ` / ${opp.bathrooms} BA` : ''}
                     {opp.sqft ? ` • ${opp.sqft.toLocaleString()} sqft` : ''}
                   </p>
+                  {opp.listing_type === 'for_sale' && opp.sale_price && (
+                    <p className="text-xs text-purple-600">
+                      Sale Price: {formatCurrency(opp.sale_price)} • Est. Rent: {formatCurrency(opp.monthly_rent)}/mo
+                      {opp.rent_estimation_method && ` (${opp.rent_estimation_method})`}
+                    </p>
+                  )}
                 </div>
 
                 {/* Metrics */}
                 <div className="hidden sm:flex items-center gap-6 text-right">
                   <div>
-                    <p className="text-xs text-gray-500">Rent</p>
+                    <p className="text-xs text-gray-500">
+                      {opp.listing_type === 'for_sale' ? 'Est. Rent' : 'Rent'}
+                    </p>
                     <p className="font-semibold text-gray-900">{formatCurrency(opp.monthly_rent)}/mo</p>
                   </div>
                   <div>
@@ -359,7 +383,7 @@ export default function SearchResults({ results, isLoading }: SearchResultsProps
                 </div>
 
                 {/* Expand Icon */}
-                {expandedId === index ? (
+                {expandedId === globalIndex ? (
                   <ChevronUp className="w-5 h-5 text-gray-400" />
                 ) : (
                   <ChevronDown className="w-5 h-5 text-gray-400" />
@@ -368,17 +392,33 @@ export default function SearchResults({ results, isLoading }: SearchResultsProps
             </div>
 
             {/* Expanded Details */}
-            {expandedId === index && (
+            {expandedId === globalIndex && (
               <div className="border-t border-gray-100 p-4 bg-gray-50">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Financials */}
                   <div>
-                    <h4 className="text-sm font-medium text-gray-900 mb-2">Financials</h4>
+                    <h4 className="text-sm font-medium text-gray-900 mb-2">
+                      {opp.listing_type === 'for_sale' ? 'Projected Financials' : 'Financials'}
+                    </h4>
                     <div className="space-y-1 text-sm">
+                      {opp.listing_type === 'for_sale' && opp.sale_price && (
+                        <div className="flex justify-between pb-1 mb-1 border-b border-gray-200">
+                          <span className="text-purple-600 font-medium">Sale Price:</span>
+                          <span className="text-purple-600 font-medium">{formatCurrency(opp.sale_price)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Annual Rent:</span>
+                        <span className="text-gray-600">
+                          {opp.listing_type === 'for_sale' ? 'Est. Annual Rent:' : 'Annual Rent:'}
+                        </span>
                         <span className="text-red-600">-{formatCurrency(opp.annual_rent)}</span>
                       </div>
+                      {opp.listing_type === 'for_sale' && opp.rent_estimation_method && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Estimation method:</span>
+                          <span className="text-gray-500 capitalize">{opp.rent_estimation_method}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between">
                         <span className="text-gray-600">STR Revenue:</span>
                         <span className="text-blue-600">+{formatCurrency(opp.estimated_annual_revenue)}</span>
@@ -469,15 +509,59 @@ export default function SearchResults({ results, isLoading }: SearchResultsProps
                   {opp.has_waterfront && <span className="text-xs bg-cyan-100 text-cyan-700 px-2 py-1 rounded">Waterfront</span>}
                   {opp.has_garage && <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">Garage</span>}
                   {opp.has_yard && <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Yard</span>}
+                  {opp.has_basement && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded">Basement</span>}
+                  {opp.has_unfinished_basement && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded">Unfinished Basement</span>}
                   <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">
                     {opp.listing_source}
                   </span>
+                  {opp.listing_type === 'for_sale' && (
+                    <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">
+                      For Sale
+                    </span>
+                  )}
                 </div>
               </div>
             )}
           </div>
-        ))}
-      </div>
+        );
+        
+        return (
+          <>
+            {/* Rental Opportunities */}
+            {rentals.length > 0 && (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <Home className="w-5 h-5 text-blue-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    For Rent ({rentals.length})
+                  </h3>
+                </div>
+                <div className="space-y-3 mb-6">
+                  {rentals.map((opp, index) => renderOpportunity(opp, index, index))}
+                </div>
+              </>
+            )}
+            
+            {/* For-Sale Opportunities */}
+            {forSale.length > 0 && (
+              <>
+                <div className="flex items-center gap-2 mb-3 mt-8">
+                  <Building className="w-5 h-5 text-purple-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    For Sale - Estimated Rent ({forSale.length})
+                  </h3>
+                  <span className="text-xs text-gray-500 ml-2">
+                    Rent estimated from comparable rentals, mortgage calculation, or AI
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {forSale.map((opp, index) => renderOpportunity(opp, index, rentals.length + index))}
+                </div>
+              </>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }

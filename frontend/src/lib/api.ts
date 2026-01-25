@@ -821,18 +821,27 @@ export interface OpportunityListing {
   bedrooms: number;
   bathrooms?: number;
   sqft?: number;
-  monthly_rent: number;
+  monthly_rent: number;  // Actual rent for rentals, estimated for for-sale
   url?: string;
   photos?: string[];
+  // Listing type - rental or for_sale
+  listing_type: 'rental' | 'for_sale';
+  sale_price?: number;  // Sale price for for-sale listings
+  rent_estimation_method?: string;  // For for-sale: 'zestimate', 'comparable', 'mortgage', 'ai'
+  // Agent info
   agent_name?: string;
   agent_phone?: string;
   agent_email?: string;
   agent_company?: string;
   listing_source: string;
+  // Amenities
   has_pool: boolean;
   has_waterfront: boolean;
   has_garage: boolean;
   has_yard: boolean;
+  has_basement?: boolean;
+  has_unfinished_basement?: boolean;
+  // Revenue
   estimated_annual_revenue: number;  // Occupancy-adjusted realistic estimate
   potential_annual_revenue?: number;  // Raw 100% occupancy potential
   occupancy_rate?: number;  // Expected occupancy (e.g., 0.58 = 58%)

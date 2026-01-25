@@ -2644,6 +2644,9 @@ async def find_opportunities(
                 monthly_rent=listing.get("price", 0),
                 url=listing.get("url"),
                 photos=photos[:5] if photos else None,
+                listing_type=listing.get("listing_type", "rental"),
+                sale_price=listing.get("sale_price"),
+                rent_estimation_method=listing.get("rent_estimation_method"),
                 agent_name=listing.get("agent_name"),
                 agent_phone=listing.get("agent_phone"),
                 agent_email=listing.get("agent_email"),
@@ -2653,6 +2656,8 @@ async def find_opportunities(
                 has_waterfront=listing.get("has_waterfront", False),
                 has_garage=listing.get("has_garage", False),
                 has_yard=listing.get("has_yard", False),
+                has_basement=listing.get("has_basement", False),
+                has_unfinished_basement=listing.get("has_unfinished_basement", False),
                 estimated_annual_revenue=metrics["estimated_annual_revenue"],
                 potential_annual_revenue=metrics["potential_annual_revenue"],
                 occupancy_rate=metrics["occupancy_rate"],
@@ -2918,14 +2923,25 @@ async def find_opportunities(
         # First try database listings (faster)
         listings = []
         if city_record:
-            db_listings = db.query(ZillowListing).filter(
+            rental_query = db.query(ZillowListing).filter(
                 ZillowListing.city_id == city_record.id,
                 ZillowListing.bedrooms >= request.min_bedrooms,
                 ZillowListing.bedrooms <= request.max_bedrooms,
                 ZillowListing.status == 'active',
+                ZillowListing.listing_type == 'rental',
                 ZillowListing.price > 100,  # Filter bad data
                 ZillowListing.price < 50000
-            ).all()
+            )
+            
+            # Apply basement filter if specified
+            if request.basement_filter == 'include':
+                rental_query = rental_query.filter(ZillowListing.has_unfinished_basement == True)
+            elif request.basement_filter == 'exclude':
+                rental_query = rental_query.filter(
+                    (ZillowListing.has_unfinished_basement == False) | (ZillowListing.has_unfinished_basement == None)
+                )
+            
+            db_listings = rental_query.all()
             
             listings = [{
                 "listing_id": l.id,
@@ -2948,7 +2964,62 @@ async def find_opportunities(
                 "has_waterfront": l.has_waterfront,
                 "has_garage": l.has_garage,
                 "has_yard": l.has_yard,
+                "has_basement": l.has_basement,
+                "has_unfinished_basement": l.has_unfinished_basement,
+                "listing_type": "rental",
             } for l in db_listings]
+            
+            # Also get for-sale listings if requested
+            if request.include_for_sale:
+                from . import rent_estimator
+                
+                forsale_query = db.query(ZillowListing).filter(
+                    ZillowListing.city_id == city_record.id,
+                    ZillowListing.bedrooms >= request.min_bedrooms,
+                    ZillowListing.bedrooms <= request.max_bedrooms,
+                    ZillowListing.status == 'active',
+                    ZillowListing.listing_type == 'for_sale',
+                    ZillowListing.sale_price > 50000,
+                )
+                
+                if request.basement_filter == 'include':
+                    forsale_query = forsale_query.filter(ZillowListing.has_unfinished_basement == True)
+                elif request.basement_filter == 'exclude':
+                    forsale_query = forsale_query.filter(
+                        (ZillowListing.has_unfinished_basement == False) | (ZillowListing.has_unfinished_basement == None)
+                    )
+                
+                forsale_listings = forsale_query.all()
+                
+                for l in forsale_listings:
+                    est_rent, est_method = rent_estimator.estimate_rent(l, db)
+                    listings.append({
+                        "listing_id": l.id,
+                        "address": l.address,
+                        "city": l.city or city_name,
+                        "state": l.state or state_code,
+                        "zip_code": l.zip_code,
+                        "bedrooms": l.bedrooms,
+                        "bathrooms": l.bathrooms,
+                        "price": est_rent,
+                        "sale_price": l.sale_price,
+                        "sqft": l.sqft,
+                        "url": l.url,
+                        "photos": json.loads(l.photos) if l.photos else [],
+                        "agent_name": l.agent_name,
+                        "agent_phone": l.agent_phone,
+                        "agent_email": l.agent_email,
+                        "agent_company": l.agent_company,
+                        "listing_source": l.listing_source or "zillow",
+                        "has_pool": l.has_pool,
+                        "has_waterfront": l.has_waterfront,
+                        "has_garage": l.has_garage,
+                        "has_yard": l.has_yard,
+                        "has_basement": l.has_basement,
+                        "has_unfinished_basement": l.has_unfinished_basement,
+                        "listing_type": "for_sale",
+                        "rent_estimation_method": est_method,
+                    })
         
         # Only call API if no database listings and API is configured
         if not listings and use_realtor_api:
@@ -2968,8 +3039,15 @@ async def find_opportunities(
         city_opps = await analyze_listings(listings, revenue_by_bedroom, city_name, state_code, None)
         opportunities.extend(city_opps)
     
-    # Sort by ROI score (highest first)
-    opportunities.sort(key=lambda x: x.roi_score, reverse=True)
+    # Sort: Rentals first, then for-sale, each sorted by ROI score (highest first)
+    rental_opps = [o for o in opportunities if o.listing_type == 'rental']
+    forsale_opps = [o for o in opportunities if o.listing_type == 'for_sale']
+    
+    rental_opps.sort(key=lambda x: x.roi_score, reverse=True)
+    forsale_opps.sort(key=lambda x: x.roi_score, reverse=True)
+    
+    # Combine: rentals first, then for-sale
+    opportunities = rental_opps + forsale_opps
     
     # Limit results
     opportunities = opportunities[:request.max_results]
