@@ -1981,7 +1981,7 @@ async def find_opportunities(
             # Build revenue lookup
             revenue_by_bedroom = {}
             for rd in revenue_data_list:
-                for br in range(rd.bedroom_min, rd.bedroom_max + 1):
+                for br in range(rd.bedrooms_min, rd.bedrooms_max + 1):
                     if br not in revenue_by_bedroom:
                         revenue_by_bedroom[br] = rd
                         revenue_sources[rd.source or "manual"] = revenue_sources.get(rd.source or "manual", 0) + 1
@@ -2061,7 +2061,7 @@ async def find_opportunities(
         
         revenue_by_bedroom = {}
         for rd in revenue_data_list:
-            for br in range(rd.bedroom_min, rd.bedroom_max + 1):
+            for br in range(rd.bedrooms_min, rd.bedrooms_max + 1):
                 if br not in revenue_by_bedroom:
                     revenue_by_bedroom[br] = rd
                     revenue_sources[rd.source or "manual"] = revenue_sources.get(rd.source or "manual", 0) + 1
@@ -2234,7 +2234,7 @@ async def get_airbtics_data_status(db: Session = Depends(get_db)):
         bedroom_ranges = set()
         latest_fetch = None
         for d in city_data:
-            bedroom_ranges.add(f"{d.bedroom_min}-{d.bedroom_max}")
+            bedroom_ranges.add(f"{d.bedrooms_min}-{d.bedrooms_max}")
             if d.last_api_fetch:
                 if not latest_fetch or d.last_api_fetch > latest_fetch:
                     latest_fetch = d.last_api_fetch
@@ -2435,7 +2435,7 @@ async def get_investment_suggestions(db: Session = Depends(get_db)):
         
         if city_airdna:
             revenues = [a.average_annual_revenue for a in city_airdna if a.average_annual_revenue]
-            bedrooms = set(a.bedroom_min for a in city_airdna if a.bedroom_min)
+            bedrooms = set(a.bedrooms_min for a in city_airdna if a.bedrooms_min)
             sources = set(a.source for a in city_airdna if a.source)
             
             avg_revenue = sum(revenues) / len(revenues) if revenues else 0
@@ -2628,8 +2628,8 @@ def export_database(db: Session = Depends(get_db)):
         "city": a.city,
         "state": a.state,
         "zip_code": a.zip_code,
-        "bedroom_min": a.bedroom_min,
-        "bedroom_max": a.bedroom_max,
+        "bedrooms_min": a.bedrooms_min,
+        "bedrooms_max": a.bedrooms_max,
         "average_annual_revenue": a.average_annual_revenue,
         "revenue_p25": a.revenue_p25,
         "revenue_p50": a.revenue_p50,
@@ -2702,8 +2702,8 @@ def import_database(data: dict, db: Session = Depends(get_db)):
         existing = db.query(AirDNAData).filter(
             AirDNAData.city == airdna_item["city"],
             AirDNAData.state == airdna_item["state"],
-            AirDNAData.bedroom_min == airdna_item.get("bedroom_min"),
-            AirDNAData.bedroom_max == airdna_item.get("bedroom_max"),
+            AirDNAData.bedrooms_min == airdna_item.get("bedrooms_min"),
+            AirDNAData.bedrooms_max == airdna_item.get("bedrooms_max"),
             AirDNAData.source == airdna_item.get("source", "manual")
         ).first()
         

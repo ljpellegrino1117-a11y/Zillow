@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 # RapidAPI configuration
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
-RAPIDAPI_HOST = "realtor.p.rapidapi.com"
-BASE_URL = "https://realtor.p.rapidapi.com"
+RAPIDAPI_HOST = "realty-in-us.p.rapidapi.com"
+BASE_URL = "https://realty-in-us.p.rapidapi.com"
 
 # Rate limiting
 API_RATE_LIMIT_DELAY = 0.5  # seconds between requests
@@ -63,34 +63,40 @@ async def search_rentals(
     
     url = f"{BASE_URL}/properties/v3/list"
     
+    # Build payload for realty-in-us API
+    # Filter by property type to get listings with actual prices
+    # (apartment complexes often lack unit-level pricing)
     payload = {
-        "limit": min(limit, 200),
+        "limit": limit,
         "offset": offset,
         "city": city,
-        "state_code": state_code,
+        "state_code": state_code.upper(),
         "status": ["for_rent"],
+        "type": ["single_family", "condos", "townhomes", "duplex_triplex", "multi_family"],
         "beds_min": min_beds,
         "beds_max": max_beds,
-        "sort": {
-            "direction": "desc",
-            "field": "list_date"
-        }
+        "sort": {"direction": "desc", "field": "list_date"}
     }
+    
+    headers = get_headers()
+    headers["Content-Type"] = "application/json"
     
     for attempt in range(MAX_RETRIES):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     url,
-                    headers=get_headers(),
+                    headers=headers,
                     json=payload
                 )
                 
                 if response.status_code == 200:
                     data = response.json()
-                    # Realtor.com API returns "properties" not "results"
-                    results = data.get("data", {}).get("home_search", {}).get("properties", [])
+                    # Parse response from realty-in-us API (uses .results not .properties)
+                    results = data.get("data", {}).get("home_search", {}).get("results", [])
                     total = data.get("data", {}).get("home_search", {}).get("total", 0)
+                    if not total:
+                        total = data.get("data", {}).get("home_search", {}).get("count", len(results))
                     
                     listings = []
                     for result in results:
@@ -134,11 +140,18 @@ def parse_listing(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     Parse a single listing from the API response.
     
     Extracts all relevant fields including agent contact info.
+    Compatible with realty-in-us.p.rapidapi.com response format.
     """
     try:
         location = data.get("location", {})
         address = location.get("address", {})
         description = data.get("description", {})
+        
+        # Extract photos - realty-in-us uses primary_photo object
+        photos = []
+        primary_photo = data.get("primary_photo", {})
+        if primary_photo and primary_photo.get("href"):
+            photos.append(primary_photo.get("href"))
         
         # Basic listing info
         listing = {
@@ -148,45 +161,58 @@ def parse_listing(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "city": address.get("city", ""),
             "state": address.get("state_code", ""),
             "zip_code": address.get("postal_code", ""),
-            "bedrooms": description.get("beds", 0),
-            "bathrooms": description.get("baths", 0),
+            "bedrooms": description.get("beds") or 0,
+            "bathrooms": description.get("baths") or 0,
             "sqft": description.get("sqft"),
             "price": data.get("list_price"),
             "property_type": description.get("type", ""),
             "year_built": description.get("year_built"),
             "lot_sqft": description.get("lot_sqft"),
-            # Build URL from permalink (Realtor.com API returns permalink, not href)
-            "url": f"https://www.realtor.com/realestateandhomes-detail/{data.get('permalink')}" if data.get("permalink") else None,
-            "photos": [p.get("href") for p in data.get("photos", [])[:5]],  # First 5 photos
+            # realty-in-us API returns href directly as full URL
+            "url": data.get("href"),
+            "photos": photos,
             "list_date": data.get("list_date"),
         }
         
-        # Agent/Advertiser info
+        # Agent/Advertiser info - realty-in-us uses advertisers array
         advertisers = data.get("advertisers", [])
         if advertisers:
             agent = advertisers[0]
             listing["agent_name"] = agent.get("name")
-            listing["agent_company"] = agent.get("office", {}).get("name")
+            listing["agent_email"] = agent.get("email")
+            listing["agent_company"] = agent.get("office", {}).get("name") if agent.get("office") else None
             
-            # Phone numbers
+            # Phone numbers (if available in API response)
             phones = agent.get("phones", [])
             if phones:
                 listing["agent_phone"] = phones[0].get("number")
-            
-            # Email (if available)
-            listing["agent_email"] = agent.get("email")
+            else:
+                listing["agent_phone"] = None
+        else:
+            listing["agent_name"] = None
+            listing["agent_email"] = None
+            listing["agent_company"] = None
+            listing["agent_phone"] = None
         
-        # Branding info as fallback
+        # Branding info as fallback for company name
         branding = data.get("branding", [])
         if branding and not listing.get("agent_company"):
             listing["agent_company"] = branding[0].get("name")
         
-        # Features/Amenities
+        # Source/MLS agent info as additional fallback
+        source = data.get("source", {})
+        source_agents = source.get("agents", [])
+        if source_agents and not listing.get("agent_name"):
+            listing["agent_name"] = source_agents[0].get("agent_name")
+            if not listing.get("agent_company"):
+                listing["agent_company"] = source_agents[0].get("office_name")
+        
+        # Features/Amenities from tags
         features = data.get("tags", []) or []
         listing["features"] = features
         
         # Parse amenities from features
-        features_lower = [f.lower() for f in features]
+        features_lower = [f.lower() for f in features if f]
         listing["has_pool"] = any("pool" in f for f in features_lower)
         listing["has_garage"] = any("garage" in f for f in features_lower)
         listing["has_waterfront"] = any(
@@ -204,7 +230,19 @@ def parse_listing(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             for w in ["yard", "backyard", "fenced"]
         )
         
-        # Validate required fields
+        # Pet policy
+        pet_policy = data.get("pet_policy", {})
+        if pet_policy:
+            listing["allows_cats"] = pet_policy.get("cats", False)
+            listing["allows_dogs"] = pet_policy.get("dogs", False)
+        
+        # Flags for listing status
+        flags = data.get("flags", {})
+        if flags:
+            listing["is_new_listing"] = flags.get("is_new_listing", False)
+            listing["is_price_reduced"] = flags.get("is_price_reduced", False)
+        
+        # Validate required fields - for rentals, price is the key field
         if not listing["address"] or not listing["price"]:
             return None
         
@@ -299,33 +337,38 @@ async def search_rentals_by_zip(
     
     url = f"{BASE_URL}/properties/v3/list"
     
+    # Build payload for realty-in-us API with zip code
+    # Filter by property type to get listings with actual prices
     payload = {
-        "limit": min(limit, 200),
+        "limit": limit,
         "offset": offset,
         "postal_code": zip_code,
         "status": ["for_rent"],
+        "type": ["single_family", "condos", "townhomes", "duplex_triplex", "multi_family"],
         "beds_min": min_beds,
         "beds_max": max_beds,
-        "sort": {
-            "direction": "desc",
-            "field": "list_date"
-        }
+        "sort": {"direction": "desc", "field": "list_date"}
     }
+    
+    headers = get_headers()
+    headers["Content-Type"] = "application/json"
     
     for attempt in range(MAX_RETRIES):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     url,
-                    headers=get_headers(),
+                    headers=headers,
                     json=payload
                 )
                 
                 if response.status_code == 200:
                     data = response.json()
-                    # Realtor.com API returns "properties" not "results"
-                    results = data.get("data", {}).get("home_search", {}).get("properties", [])
+                    # Parse response from realty-in-us API (uses .results not .properties)
+                    results = data.get("data", {}).get("home_search", {}).get("results", [])
                     total = data.get("data", {}).get("home_search", {}).get("total", 0)
+                    if not total:
+                        total = data.get("data", {}).get("home_search", {}).get("count", len(results))
                     
                     listings = []
                     for result in results:
