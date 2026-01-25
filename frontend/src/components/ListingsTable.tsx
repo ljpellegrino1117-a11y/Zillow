@@ -266,13 +266,16 @@ export default function ListingsTable({ refreshTrigger }: Props) {
   // Export functions
   const exportToCSV = useCallback(() => {
     const headers = [
-      'Type', 'Address', 'City', 'State', 'Zip', 'Bedrooms', 'Potential BR', 
+      'Type', 'Status', 'Source', 'Address', 'City', 'State', 'Zip', 'Bedrooms', 'Potential BR', 
       'Bathrooms', 'Price/Mo', 'Sale Price', 'SqFt', 'Extra Rooms', 
-      'Pool', 'Waterfront', 'Basement', 'Garage', 'Creative Financing', 'URL'
+      'Pool', 'Waterfront', 'Basement', 'Garage', 'Creative Financing', 
+      'First Seen', 'Last Seen', 'URL'
     ];
     
     const rows = sortedListings.map(l => [
       l.listing_type,
+      l.status || 'active',
+      l.listing_source || 'zillow',
       l.address,
       l.city,
       l.state,
@@ -289,6 +292,8 @@ export default function ListingsTable({ refreshTrigger }: Props) {
       l.has_basement ? 'Yes' : 'No',
       l.has_garage ? 'Yes' : 'No',
       l.has_creative_financing ? 'Yes' : 'No',
+      l.first_seen ? new Date(l.first_seen).toLocaleDateString() : '',
+      l.last_seen ? new Date(l.last_seen).toLocaleDateString() : '',
       l.url || ''
     ]);
     
@@ -300,7 +305,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `zillow-listings-${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `rental-listings-${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }, [sortedListings]);
@@ -503,6 +508,7 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                     <tr key={listing.id} className={optionalScore > 0 ? 'bg-yellow-50' : ''}>
                       <td>
                         <div className="flex flex-col gap-1">
+                          {/* Listing type */}
                           {listing.listing_type === 'for_sale' ? (
                             <span className="text-xs font-semibold bg-purple-100 text-purple-700 px-2 py-0.5 rounded w-fit">
                               FOR SALE
@@ -510,6 +516,23 @@ export default function ListingsTable({ refreshTrigger }: Props) {
                           ) : (
                             <span className="text-xs font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded w-fit">
                               RENTAL
+                            </span>
+                          )}
+                          {/* Source badge */}
+                          <span className={`text-xs px-2 py-0.5 rounded w-fit ${
+                            listing.listing_source === 'both' 
+                              ? 'bg-green-100 text-green-700'
+                              : listing.listing_source === 'realtor' 
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {listing.listing_source === 'both' ? 'Both APIs' 
+                              : listing.listing_source === 'realtor' ? 'Realtor' : 'Zillow'}
+                          </span>
+                          {/* Status badge */}
+                          {listing.status === 'rented' && (
+                            <span className="text-xs font-semibold bg-orange-100 text-orange-700 px-2 py-0.5 rounded w-fit">
+                              RENTED
                             </span>
                           )}
                           {listing.has_creative_financing && (

@@ -122,7 +122,30 @@ export interface ZillowListing {
   sale_price: number | null;
   has_creative_financing: boolean;
   financing_keywords: string | null;
+  // Agent info
+  agent_name: string | null;
+  agent_phone: string | null;
+  agent_email: string | null;
+  agent_company: string | null;
+  listing_source: 'zillow' | 'realtor' | 'both' | 'manual';
+  photos: string | null;
+  // Listing lifecycle tracking
+  status: 'active' | 'rented' | 'expired';
+  first_seen: string | null;
+  last_seen: string | null;
   scraped_at: string;
+  marked_rented_at: string | null;
+}
+
+export interface ListingsLifecycleStats {
+  total_listings: number;
+  active_listings: number;
+  rented_listings: number;
+  expired_listings: number;
+  listings_by_source: Record<string, number>;
+  oldest_listing_date: string | null;
+  newest_listing_date: string | null;
+  retention_days: number;
 }
 
 export interface AirDNAAmenities {
@@ -392,6 +415,16 @@ export const getAmenityCounts = async (city?: string, state?: string, bedrooms?:
   
   const response = await axios.get(`${API_BASE}/listings/amenity-counts?${params.toString()}`);
   setCache(cacheKey, response.data);
+  return response.data;
+};
+
+export const getListingsLifecycleStats = async (): Promise<ListingsLifecycleStats> => {
+  const cacheKey = 'listings_lifecycle_stats';
+  const cached = getCached<ListingsLifecycleStats>(cacheKey);
+  if (cached) return cached;
+  
+  const response = await axios.get(`${API_BASE}/listings/lifecycle-stats`);
+  setCache(cacheKey, response.data, DEFAULT_CACHE_TTL);
   return response.data;
 };
 

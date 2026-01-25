@@ -9,13 +9,18 @@ import {
   ChevronUp,
   RefreshCw,
   Loader2,
-  MapPin
+  MapPin,
+  Home,
+  Clock,
+  Building2
 } from 'lucide-react';
 import { 
   getAirbticsCityStatuses, 
   getDatabaseStatus,
+  getListingsLifecycleStats,
   AirbticsCityStatus,
-  DatabaseStatus
+  DatabaseStatus,
+  ListingsLifecycleStats
 } from '@/lib/api';
 
 interface DataStatusBarProps {
@@ -26,6 +31,7 @@ interface DataStatusBarProps {
 export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatusBarProps) {
   const [cityStatuses, setCityStatuses] = useState<AirbticsCityStatus[]>([]);
   const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
+  const [listingsStats, setListingsStats] = useState<ListingsLifecycleStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,12 +44,14 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
     try {
       setLoading(true);
       setError(null);
-      const [cities, db] = await Promise.all([
+      const [cities, db, listings] = await Promise.all([
         getAirbticsCityStatuses(),
-        getDatabaseStatus()
+        getDatabaseStatus(),
+        getListingsLifecycleStats()
       ]);
       setCityStatuses(cities);
       setDbStatus(db);
+      setListingsStats(listings);
     } catch (err) {
       setError('Failed to load data status');
       console.error(err);
@@ -211,6 +219,44 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
                       </span>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Listings Status Section */}
+              {listingsStats && (
+                <div className="pt-3 border-t border-gray-200">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                    <Home className="w-4 h-4" />
+                    Rental Listings ({listingsStats.retention_days}-Day Retention)
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div className="bg-green-50 rounded-lg p-2 text-center">
+                      <div className="text-lg font-bold text-green-700">{listingsStats.active_listings}</div>
+                      <div className="text-xs text-green-600">Active Listings</div>
+                    </div>
+                    <div className="bg-orange-50 rounded-lg p-2 text-center">
+                      <div className="text-lg font-bold text-orange-700">{listingsStats.rented_listings}</div>
+                      <div className="text-xs text-orange-600">Marked Rented</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-2 text-center">
+                      <div className="text-lg font-bold text-gray-700">{listingsStats.listings_by_source?.zillow || 0}</div>
+                      <div className="text-xs text-gray-600">Zillow Only</div>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-2 text-center">
+                      <div className="text-lg font-bold text-blue-700">{listingsStats.listings_by_source?.realtor || 0}</div>
+                      <div className="text-xs text-blue-600">Realtor Only</div>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-2 text-center">
+                      <div className="text-lg font-bold text-emerald-700">{listingsStats.listings_by_source?.both || 0}</div>
+                      <div className="text-xs text-emerald-600">Both APIs</div>
+                    </div>
+                  </div>
+                  {listingsStats.oldest_listing_date && (
+                    <div className="mt-2 text-xs text-gray-500 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      Data range: {new Date(listingsStats.oldest_listing_date).toLocaleDateString()} - {listingsStats.newest_listing_date ? new Date(listingsStats.newest_listing_date).toLocaleDateString() : 'now'}
+                    </div>
+                  )}
                 </div>
               )}
 

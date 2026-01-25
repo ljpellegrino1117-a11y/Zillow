@@ -3,18 +3,58 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 import os
+import sys
+import logging
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./zillow_arbitrage.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# Rental data retention period (days)
+LISTING_RETENTION_DAYS = 45
+
+# PostgreSQL is REQUIRED for production use
+# SQLite is only allowed for development/testing with explicit opt-in
+ALLOW_SQLITE = os.getenv("ALLOW_SQLITE", "false").lower() == "true"
+
+if not DATABASE_URL:
+    if ALLOW_SQLITE:
+        DATABASE_URL = "sqlite:///./zillow_arbitrage.db"
+        logger.warning("⚠️  No DATABASE_URL set. Using SQLite for development. Set DATABASE_URL for PostgreSQL in production.")
+    else:
+        print("\n" + "="*70)
+        print("❌ DATABASE_URL environment variable is required!")
+        print("="*70)
+        print("\nPostgreSQL is required for rental data storage.")
+        print("\nSet up PostgreSQL and add to your .env file:")
+        print("  DATABASE_URL=postgresql://user:password@localhost:5432/zillow")
+        print("\nFor development/testing only, you can enable SQLite:")
+        print("  ALLOW_SQLITE=true")
+        print("="*70 + "\n")
+        sys.exit(1)
 
 # Detect database type
 is_sqlite = DATABASE_URL.startswith("sqlite")
+is_postgres = DATABASE_URL.startswith("postgresql")
+
+if is_sqlite and not ALLOW_SQLITE:
+    print("\n" + "="*70)
+    print("❌ SQLite is not allowed in production!")
+    print("="*70)
+    print("\nRental data requires PostgreSQL for proper 45-day retention.")
+    print("\nSet DATABASE_URL to a PostgreSQL connection string:")
+    print("  DATABASE_URL=postgresql://user:password@localhost:5432/zillow")
+    print("\nFor development only, set ALLOW_SQLITE=true")
+    print("="*70 + "\n")
+    sys.exit(1)
 
 # Configure engine based on database type
 if is_sqlite:
+    logger.warning("🔶 Running with SQLite - NOT recommended for production!")
     # SQLite configuration with thread safety and optimizations
     engine = create_engine(
         DATABASE_URL,
@@ -42,7 +82,8 @@ if is_sqlite:
         cursor.execute("PRAGMA read_uncommitted=ON")  # Faster reads (ok for this use case)
         cursor.close()
 else:
-    # PostgreSQL configuration
+    # PostgreSQL configuration (recommended for production)
+    logger.info("✅ Using PostgreSQL database")
     engine = create_engine(
         DATABASE_URL,
         pool_size=10,

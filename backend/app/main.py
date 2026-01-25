@@ -12,11 +12,11 @@ import time
 import base64
 import os
 
-from .database import engine, get_db, Base, DATABASE_URL, is_sqlite
+from .database import engine, get_db, Base, DATABASE_URL, is_sqlite, LISTING_RETENTION_DAYS
 from .models import City, ZillowListing, AirDNAData, AIScreenshotAnalysis, AirbticsMarket
 from .schemas import (
     CityCreate, CityResponse,
-    ZillowListingResponse,
+    ZillowListingResponse, ListingsStatsResponse,
     AirDNAInput, AirDNADataResponse,
     DiscrepancyResult,
     ScrapeRequest, ScrapeStatus,
@@ -186,6 +186,220 @@ def delete_city(city: str, state: str, zip_code: Optional[str] = None, db: Sessi
 
 # ==================== Scraping Endpoints ====================
 
+def _create_listing_from_data(listing_data: Dict[str, Any], city_id: int, source: str = 'zillow') -> ZillowListing:
+    """Create a ZillowListing object from scraped data."""
+    now = datetime.utcnow()
+    return ZillowListing(
+        zillow_id=listing_data.get('zillow_id') or listing_data.get('property_id') or listing_data.get('listing_id'),
+        city_id=city_id,
+        address=listing_data['address'],
+        city=listing_data.get('city'),
+        state=listing_data.get('state'),
+        zip_code=listing_data.get('zip_code'),
+        bedrooms=listing_data['bedrooms'],
+        bathrooms=listing_data.get('bathrooms'),
+        price=listing_data['price'],
+        description=listing_data.get('description'),
+        property_type=listing_data.get('property_type'),
+        sqft=listing_data.get('sqft'),
+        url=listing_data.get('url'),
+        amenities_raw=listing_data.get('amenities_raw'),
+        has_pool=listing_data.get('has_pool', False),
+        has_waterfront=listing_data.get('has_waterfront', False),
+        has_basement=listing_data.get('has_basement', False),
+        has_unfinished_basement=listing_data.get('has_unfinished_basement', False),
+        has_finished_basement=listing_data.get('has_finished_basement', False),
+        has_garage=listing_data.get('has_garage', False),
+        has_parking=listing_data.get('has_parking', False),
+        has_laundry=listing_data.get('has_laundry', False),
+        has_ac=listing_data.get('has_ac', False),
+        has_fireplace=listing_data.get('has_fireplace', False),
+        has_yard=listing_data.get('has_yard', False),
+        has_patio=listing_data.get('has_patio', False),
+        has_balcony=listing_data.get('has_balcony', False),
+        has_gym=listing_data.get('has_gym', False),
+        has_pet_friendly=listing_data.get('has_pet_friendly', False),
+        extra_rooms_count=listing_data.get('extra_rooms_count', 0),
+        extra_rooms_details=listing_data.get('extra_rooms_details'),
+        potential_bedrooms=listing_data.get('potential_bedrooms'),
+        has_office=listing_data.get('has_office', False),
+        has_den=listing_data.get('has_den', False),
+        has_bonus_room=listing_data.get('has_bonus_room', False),
+        has_loft=listing_data.get('has_loft', False),
+        has_flex_space=listing_data.get('has_flex_space', False),
+        has_sunroom=listing_data.get('has_sunroom', False),
+        has_media_room=listing_data.get('has_media_room', False),
+        has_game_room=listing_data.get('has_game_room', False),
+        has_guest_room=listing_data.get('has_guest_room', False),
+        has_nursery=listing_data.get('has_nursery', False),
+        has_studio=listing_data.get('has_studio', False),
+        has_attic=listing_data.get('has_attic', False),
+        has_mother_in_law=listing_data.get('has_mother_in_law', False),
+        listing_type=listing_data.get('listing_type', 'rental'),
+        sale_price=listing_data.get('sale_price'),
+        has_creative_financing=listing_data.get('has_creative_financing', False),
+        financing_keywords=listing_data.get('financing_keywords'),
+        agent_name=listing_data.get('agent_name'),
+        agent_phone=listing_data.get('agent_phone'),
+        agent_email=listing_data.get('agent_email'),
+        agent_company=listing_data.get('agent_company'),
+        listing_source=source,
+        photos=json.dumps(listing_data.get('photos', [])) if listing_data.get('photos') else None,
+        status='active',
+        first_seen=now,
+        last_seen=now,
+        scraped_at=now,
+    )
+
+
+def _update_listing_from_data(existing: ZillowListing, listing_data: Dict[str, Any]) -> None:
+    """Update an existing listing with fresh data (preserves first_seen)."""
+    now = datetime.utcnow()
+    existing.address = listing_data['address']
+    existing.city = listing_data.get('city')
+    existing.state = listing_data.get('state')
+    existing.zip_code = listing_data.get('zip_code')
+    existing.bedrooms = listing_data['bedrooms']
+    existing.bathrooms = listing_data.get('bathrooms')
+    existing.price = listing_data['price']
+    existing.description = listing_data.get('description')
+    existing.property_type = listing_data.get('property_type')
+    existing.sqft = listing_data.get('sqft')
+    existing.url = listing_data.get('url')
+    existing.amenities_raw = listing_data.get('amenities_raw')
+    existing.has_pool = listing_data.get('has_pool', False)
+    existing.has_waterfront = listing_data.get('has_waterfront', False)
+    existing.has_basement = listing_data.get('has_basement', False)
+    existing.has_unfinished_basement = listing_data.get('has_unfinished_basement', False)
+    existing.has_finished_basement = listing_data.get('has_finished_basement', False)
+    existing.has_garage = listing_data.get('has_garage', False)
+    existing.has_parking = listing_data.get('has_parking', False)
+    existing.has_laundry = listing_data.get('has_laundry', False)
+    existing.has_ac = listing_data.get('has_ac', False)
+    existing.has_fireplace = listing_data.get('has_fireplace', False)
+    existing.has_yard = listing_data.get('has_yard', False)
+    existing.has_patio = listing_data.get('has_patio', False)
+    existing.has_balcony = listing_data.get('has_balcony', False)
+    existing.has_gym = listing_data.get('has_gym', False)
+    existing.has_pet_friendly = listing_data.get('has_pet_friendly', False)
+    existing.extra_rooms_count = listing_data.get('extra_rooms_count', 0)
+    existing.extra_rooms_details = listing_data.get('extra_rooms_details')
+    existing.potential_bedrooms = listing_data.get('potential_bedrooms')
+    existing.has_office = listing_data.get('has_office', False)
+    existing.has_den = listing_data.get('has_den', False)
+    existing.has_bonus_room = listing_data.get('has_bonus_room', False)
+    existing.has_loft = listing_data.get('has_loft', False)
+    existing.has_flex_space = listing_data.get('has_flex_space', False)
+    existing.has_sunroom = listing_data.get('has_sunroom', False)
+    existing.has_media_room = listing_data.get('has_media_room', False)
+    existing.has_game_room = listing_data.get('has_game_room', False)
+    existing.has_guest_room = listing_data.get('has_guest_room', False)
+    existing.has_nursery = listing_data.get('has_nursery', False)
+    existing.has_studio = listing_data.get('has_studio', False)
+    existing.has_attic = listing_data.get('has_attic', False)
+    existing.has_mother_in_law = listing_data.get('has_mother_in_law', False)
+    existing.listing_type = listing_data.get('listing_type', 'rental')
+    existing.sale_price = listing_data.get('sale_price')
+    existing.has_creative_financing = listing_data.get('has_creative_financing', False)
+    existing.financing_keywords = listing_data.get('financing_keywords')
+    # Update agent info if available
+    if listing_data.get('agent_name'):
+        existing.agent_name = listing_data.get('agent_name')
+    if listing_data.get('agent_phone'):
+        existing.agent_phone = listing_data.get('agent_phone')
+    if listing_data.get('agent_email'):
+        existing.agent_email = listing_data.get('agent_email')
+    if listing_data.get('agent_company'):
+        existing.agent_company = listing_data.get('agent_company')
+    if listing_data.get('photos'):
+        existing.photos = json.dumps(listing_data.get('photos', []))
+    # Update timestamps - keep first_seen, update last_seen
+    existing.last_seen = now
+    existing.scraped_at = now
+    # Re-activate if was marked as rented but came back
+    if existing.status == 'rented':
+        existing.status = 'active'
+        existing.marked_rented_at = None
+        logger.info(f"Listing {existing.zillow_id} re-activated (was rented, now back on market)")
+
+
+def _normalize_address(address: str) -> str:
+    """
+    Normalize address for deduplication matching.
+    Removes common variations to match the same property across sources.
+    """
+    if not address:
+        return ""
+    # Lowercase and strip
+    addr = address.lower().strip()
+    # Remove common abbreviations and normalize
+    replacements = [
+        (' street', ' st'),
+        (' avenue', ' ave'),
+        (' boulevard', ' blvd'),
+        (' drive', ' dr'),
+        (' road', ' rd'),
+        (' lane', ' ln'),
+        (' court', ' ct'),
+        (' place', ' pl'),
+        (' circle', ' cir'),
+        (' apartment', ' apt'),
+        (' suite', ' ste'),
+        (' unit', ' #'),
+        (' #', ' '),
+        ('.', ''),
+        (',', ''),
+        ('  ', ' '),
+    ]
+    for old, new in replacements:
+        addr = addr.replace(old, new)
+    # Remove extra spaces
+    addr = ' '.join(addr.split())
+    return addr
+
+
+def _merge_listing_data(zillow_data: Dict[str, Any], realtor_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge listing data from Zillow and Realtor.com.
+    Prefers Realtor for agent info, uses Zillow as base with Realtor enhancements.
+    """
+    # Start with Zillow data as base
+    merged = zillow_data.copy()
+    
+    # Prefer Realtor agent contact info (more reliable)
+    if realtor_data.get('agent_name'):
+        merged['agent_name'] = realtor_data['agent_name']
+    if realtor_data.get('agent_phone'):
+        merged['agent_phone'] = realtor_data['agent_phone']
+    if realtor_data.get('agent_email'):
+        merged['agent_email'] = realtor_data['agent_email']
+    if realtor_data.get('agent_company'):
+        merged['agent_company'] = realtor_data['agent_company']
+    
+    # Use Realtor photos if Zillow doesn't have any
+    if realtor_data.get('photos') and not merged.get('photos'):
+        merged['photos'] = realtor_data['photos']
+    
+    # Keep Realtor URL as secondary reference
+    if realtor_data.get('url'):
+        merged['realtor_url'] = realtor_data['url']
+    
+    # Merge amenities (OR logic - if either source says yes)
+    amenity_fields = [
+        'has_pool', 'has_waterfront', 'has_basement', 'has_garage',
+        'has_parking', 'has_laundry', 'has_ac', 'has_fireplace',
+        'has_yard', 'has_patio', 'has_balcony', 'has_gym', 'has_pet_friendly'
+    ]
+    for field in amenity_fields:
+        if realtor_data.get(field) or merged.get(field):
+            merged[field] = True
+    
+    # Mark as from both sources
+    merged['listing_source'] = 'both'
+    
+    return merged
+
+
 async def run_scrape_job(
     city: str, 
     state: str, 
@@ -197,18 +411,127 @@ async def run_scrape_job(
     surrounding_miles: int = None,
     surrounding_only: bool = False
 ):
-    """Background task to run scraping job."""
+    """
+    Background task to run scraping job with smart diff logic.
+    
+    ALWAYS fetches from both Zillow AND Realtor.com APIs:
+    - Cross-references listings by address to eliminate duplicates
+    - Merges data when same property found in both sources
+    - Updates existing listings (preserves first_seen)
+    - Adds new listings
+    - Marks missing listings as 'rented' (assumes property was rented)
+    - Listings are deleted after 45 days via cleanup job
+    """
     job_key = f"{city}_{state}" + (f"_{zip_code}" if zip_code else "")
-    scrape_jobs[job_key] = {"status": "running", "listings_found": 0, "message": "Scraping in progress..."}
+    scrape_jobs[job_key] = {"status": "running", "listings_found": 0, "message": "Fetching from Zillow and Realtor.com..."}
     
     try:
-        listings = await scrape_zillow(
-            city, state, min_bedrooms, max_bedrooms, 
-            zip_code=zip_code,
-            include_surrounding=include_surrounding,
-            surrounding_miles=surrounding_miles,
-            surrounding_only=surrounding_only
-        )
+        # ALWAYS fetch from BOTH sources
+        zillow_listings = []
+        realtor_listings = []
+        zillow_error = None
+        realtor_error = None
+        
+        # Fetch from Zillow
+        try:
+            logger.info(f"Fetching Zillow listings for {city}, {state}")
+            zillow_listings = await scrape_zillow(
+                city, state, min_bedrooms, max_bedrooms, 
+                zip_code=zip_code,
+                include_surrounding=include_surrounding,
+                surrounding_miles=surrounding_miles,
+                surrounding_only=surrounding_only
+            )
+            logger.info(f"Found {len(zillow_listings)} Zillow listings")
+        except Exception as e:
+            zillow_error = str(e)
+            logger.warning(f"Zillow scraper error: {e}")
+        
+        # ALWAYS fetch from Realtor.com (not conditional on is_configured)
+        try:
+            logger.info(f"Fetching Realtor.com listings for {city}, {state}")
+            if realtor_api.is_configured():
+                realtor_listings = await realtor_api.search_all_rentals(
+                    city=city,
+                    state_code=state,
+                    min_beds=min_bedrooms,
+                    max_beds=max_bedrooms,
+                    max_listings=500
+                )
+                logger.info(f"Found {len(realtor_listings)} Realtor.com listings")
+            else:
+                realtor_error = "RAPIDAPI_KEY not configured"
+                logger.warning("Realtor.com API not configured (RAPIDAPI_KEY missing)")
+        except Exception as e:
+            realtor_error = str(e)
+            logger.warning(f"Realtor.com API error: {e}")
+        
+        # Check if we got any data
+        if not zillow_listings and not realtor_listings:
+            error_msg = "No listings found from either source."
+            if zillow_error:
+                error_msg += f" Zillow: {zillow_error}."
+            if realtor_error:
+                error_msg += f" Realtor: {realtor_error}."
+            scrape_jobs[job_key] = {
+                "status": "failed",
+                "listings_found": 0,
+                "message": error_msg
+            }
+            return
+        
+        # ============================================================
+        # DEDUPLICATION: Cross-reference listings by normalized address
+        # ============================================================
+        
+        # Index Zillow listings by normalized address
+        zillow_by_address = {}
+        for listing in zillow_listings:
+            addr_key = _normalize_address(listing.get('address', ''))
+            if addr_key:
+                zillow_by_address[addr_key] = listing
+        
+        # Index Realtor listings by normalized address
+        realtor_by_address = {}
+        for listing in realtor_listings:
+            addr_key = _normalize_address(listing.get('address', ''))
+            if addr_key:
+                realtor_by_address[addr_key] = listing
+        
+        # Find duplicates and merge, track unique listings
+        merged_listings = []  # Listings found in both sources (merged)
+        zillow_only = []      # Listings only in Zillow
+        realtor_only = []     # Listings only in Realtor
+        
+        # Process Zillow listings, check for Realtor matches
+        for addr_key, zillow_data in zillow_by_address.items():
+            if addr_key in realtor_by_address:
+                # DUPLICATE FOUND - merge data from both sources
+                realtor_data = realtor_by_address[addr_key]
+                merged = _merge_listing_data(zillow_data, realtor_data)
+                merged_listings.append(merged)
+                logger.debug(f"Merged duplicate listing: {zillow_data.get('address')}")
+            else:
+                # Zillow only
+                zillow_data['listing_source'] = 'zillow'
+                zillow_only.append(zillow_data)
+        
+        # Find Realtor-only listings (not in Zillow)
+        for addr_key, realtor_data in realtor_by_address.items():
+            if addr_key not in zillow_by_address:
+                realtor_data['listing_source'] = 'realtor'
+                realtor_only.append(realtor_data)
+        
+        # Combine all unique listings
+        all_listings = merged_listings + zillow_only + realtor_only
+        
+        logger.info(f"Deduplication results: {len(merged_listings)} merged, "
+                   f"{len(zillow_only)} Zillow-only, {len(realtor_only)} Realtor-only, "
+                   f"{len(all_listings)} total unique listings")
+        
+        # ============================================================
+        # DATABASE OPERATIONS
+        # ============================================================
         
         db = db_session_factory()
         try:
@@ -229,65 +552,78 @@ async def run_scrape_job(
                 db.commit()
                 db.refresh(city_obj)
             
-            # Clear old listings
-            db.query(ZillowListing).filter(ZillowListing.city_id == city_obj.id).delete()
+            # Get all existing active listings for this city
+            existing_listings = db.query(ZillowListing).filter(
+                ZillowListing.city_id == city_obj.id,
+                ZillowListing.status == 'active'
+            ).all()
+            existing_by_id = {l.zillow_id: l for l in existing_listings}
+            existing_by_address = {_normalize_address(l.address): l for l in existing_listings}
             
-            # Add new listings
-            for listing_data in listings:
-                listing = ZillowListing(
-                    zillow_id=listing_data['zillow_id'],
-                    city_id=city_obj.id,
-                    address=listing_data['address'],
-                    city=listing_data.get('city'),
-                    state=listing_data.get('state'),
-                    zip_code=listing_data.get('zip_code'),
-                    bedrooms=listing_data['bedrooms'],
-                    bathrooms=listing_data.get('bathrooms'),
-                    price=listing_data['price'],
-                    description=listing_data.get('description'),
-                    property_type=listing_data.get('property_type'),
-                    sqft=listing_data.get('sqft'),
-                    url=listing_data.get('url'),
-                    amenities_raw=listing_data.get('amenities_raw'),
-                    has_pool=listing_data.get('has_pool', False),
-                    has_waterfront=listing_data.get('has_waterfront', False),  # Includes waterfront AND waterview
-                    has_basement=listing_data.get('has_basement', False),
-                    has_unfinished_basement=listing_data.get('has_unfinished_basement', False),
-                    has_finished_basement=listing_data.get('has_finished_basement', False),
-                    has_garage=listing_data.get('has_garage', False),
-                    has_parking=listing_data.get('has_parking', False),
-                    has_laundry=listing_data.get('has_laundry', False),
-                    has_ac=listing_data.get('has_ac', False),
-                    has_fireplace=listing_data.get('has_fireplace', False),
-                    has_yard=listing_data.get('has_yard', False),
-                    has_patio=listing_data.get('has_patio', False),
-                    has_balcony=listing_data.get('has_balcony', False),
-                    has_gym=listing_data.get('has_gym', False),
-                    has_pet_friendly=listing_data.get('has_pet_friendly', False),
-                    # Extra rooms that could be bedrooms
-                    extra_rooms_count=listing_data.get('extra_rooms_count', 0),
-                    extra_rooms_details=listing_data.get('extra_rooms_details'),
-                    potential_bedrooms=listing_data.get('potential_bedrooms'),
-                    has_office=listing_data.get('has_office', False),
-                    has_den=listing_data.get('has_den', False),
-                    has_bonus_room=listing_data.get('has_bonus_room', False),
-                    has_loft=listing_data.get('has_loft', False),
-                    has_flex_space=listing_data.get('has_flex_space', False),
-                    has_sunroom=listing_data.get('has_sunroom', False),
-                    has_media_room=listing_data.get('has_media_room', False),
-                    has_game_room=listing_data.get('has_game_room', False),
-                    has_guest_room=listing_data.get('has_guest_room', False),
-                    has_nursery=listing_data.get('has_nursery', False),
-                    has_studio=listing_data.get('has_studio', False),
-                    has_attic=listing_data.get('has_attic', False),
-                    has_mother_in_law=listing_data.get('has_mother_in_law', False),
-                    # Listing type and creative financing
-                    listing_type=listing_data.get('listing_type', 'rental'),
-                    sale_price=listing_data.get('sale_price'),
-                    has_creative_financing=listing_data.get('has_creative_financing', False),
-                    financing_keywords=listing_data.get('financing_keywords'),
-                )
-                db.add(listing)
+            # Track which listings we've seen in this scrape
+            seen_ids = set()
+            seen_addresses = set()
+            new_count = 0
+            updated_count = 0
+            merged_count = len(merged_listings)
+            
+            # Process all deduplicated listings
+            for listing_data in all_listings:
+                # Generate a unique ID based on source
+                source = listing_data.get('listing_source', 'zillow')
+                if source == 'both':
+                    # Use Zillow ID for merged listings
+                    listing_id = listing_data.get('zillow_id')
+                elif source == 'realtor':
+                    listing_id = f"realtor_{listing_data.get('property_id') or listing_data.get('listing_id')}"
+                else:
+                    listing_id = listing_data.get('zillow_id')
+                
+                if not listing_id:
+                    continue
+                
+                listing_data['zillow_id'] = listing_id
+                addr_key = _normalize_address(listing_data.get('address', ''))
+                
+                seen_ids.add(listing_id)
+                seen_addresses.add(addr_key)
+                
+                # Check if we already have this listing (by ID or address)
+                existing = existing_by_id.get(listing_id) or existing_by_address.get(addr_key)
+                
+                if existing:
+                    # Update existing listing
+                    _update_listing_from_data(existing, listing_data)
+                    # Update source if now found in both
+                    if source == 'both':
+                        existing.listing_source = 'both'
+                    updated_count += 1
+                else:
+                    # Check if exists but was marked rented (re-listed)
+                    rented_existing = db.query(ZillowListing).filter(
+                        ZillowListing.zillow_id == listing_id
+                    ).first()
+                    if rented_existing:
+                        rented_existing.city_id = city_obj.id
+                        _update_listing_from_data(rented_existing, listing_data)
+                        updated_count += 1
+                    else:
+                        # New listing
+                        new_listing = _create_listing_from_data(listing_data, city_obj.id, source=source)
+                        db.add(new_listing)
+                        new_count += 1
+            
+            # Mark listings not seen in this scrape as 'rented'
+            # (they're no longer on the market - assume rented)
+            rented_count = 0
+            now = datetime.utcnow()
+            for listing in existing_listings:
+                addr_key = _normalize_address(listing.address)
+                if listing.zillow_id not in seen_ids and addr_key not in seen_addresses:
+                    listing.status = 'rented'
+                    listing.marked_rented_at = now
+                    rented_count += 1
+                    logger.info(f"Marked listing {listing.zillow_id} as rented (no longer in either API)")
             
             city_obj.last_scraped = datetime.utcnow()
             db.commit()
@@ -296,10 +632,27 @@ async def run_scrape_job(
             listings_cache.invalidate()
             analysis_cache.invalidate()
             
+            total_unique = new_count + updated_count
+            message = f"Scraped {total_unique} unique listings ({new_count} new, {updated_count} updated"
+            if merged_count > 0:
+                message += f", {merged_count} cross-referenced from both APIs"
+            if rented_count > 0:
+                message += f", {rented_count} marked as rented"
+            message += ")"
+            
+            # Add source breakdown
+            source_info = f" [Zillow: {len(zillow_listings)}, Realtor: {len(realtor_listings)}]"
+            
             scrape_jobs[job_key] = {
                 "status": "completed",
-                "listings_found": len(listings),
-                "message": f"Successfully scraped {len(listings)} listings"
+                "listings_found": total_unique,
+                "new_listings": new_count,
+                "updated_listings": updated_count,
+                "merged_duplicates": merged_count,
+                "rented_listings": rented_count,
+                "zillow_count": len(zillow_listings),
+                "realtor_count": len(realtor_listings),
+                "message": message + source_info
             }
         finally:
             db.close()
@@ -395,6 +748,9 @@ def get_listings(
     max_bedrooms: Optional[int] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
+    # Listing status filter
+    status: Optional[str] = 'active',  # 'active', 'rented', 'all' - defaults to active only
+    listing_source: Optional[str] = None,  # 'zillow', 'realtor', or None for all
     # Listing type filters
     listing_type: Optional[str] = None,  # 'rental', 'for_sale', or None for all
     has_creative_financing: Optional[bool] = None,
@@ -457,6 +813,14 @@ def get_listings(
         query = query.filter(ZillowListing.price >= min_price)
     if max_price is not None:
         query = query.filter(ZillowListing.price <= max_price)
+    
+    # Listing status filter (default to active only)
+    if status and status != 'all':
+        query = query.filter(ZillowListing.status == status)
+    
+    # Listing source filter
+    if listing_source:
+        query = query.filter(ZillowListing.listing_source == listing_source)
     
     # Listing type filters
     if listing_type:
@@ -575,6 +939,50 @@ def get_listing_stats(
     # Cache the result
     listings_cache.set(cache_key, result)
     return result
+
+
+@app.get("/api/listings/lifecycle-stats", response_model=ListingsStatsResponse)
+def get_listings_lifecycle_stats(db: Session = Depends(get_db)):
+    """
+    Get listing lifecycle statistics.
+    
+    Shows counts by status (active/rented/expired), data sources,
+    and date ranges for 45-day retention visibility.
+    """
+    from sqlalchemy import case
+    
+    # Get counts by status
+    status_counts = db.query(
+        ZillowListing.status,
+        func.count(ZillowListing.id).label('count')
+    ).group_by(ZillowListing.status).all()
+    
+    status_dict = {s.status: s.count for s in status_counts}
+    
+    # Get counts by source
+    source_counts = db.query(
+        ZillowListing.listing_source,
+        func.count(ZillowListing.id).label('count')
+    ).group_by(ZillowListing.listing_source).all()
+    
+    source_dict = {s.listing_source: s.count for s in source_counts}
+    
+    # Get date ranges
+    date_stats = db.query(
+        func.min(ZillowListing.first_seen).label('oldest'),
+        func.max(ZillowListing.first_seen).label('newest')
+    ).first()
+    
+    return ListingsStatsResponse(
+        total_listings=sum(status_dict.values()),
+        active_listings=status_dict.get('active', 0),
+        rented_listings=status_dict.get('rented', 0),
+        expired_listings=status_dict.get('expired', 0),
+        listings_by_source=source_dict,
+        oldest_listing_date=date_stats.oldest if date_stats else None,
+        newest_listing_date=date_stats.newest if date_stats else None,
+        retention_days=LISTING_RETENTION_DAYS,
+    )
 
 
 @app.get("/api/listings/amenity-counts")
@@ -1617,7 +2025,53 @@ def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
-# ==================== Auto-cleanup for old AirDNA data ====================
+# ==================== Auto-cleanup for old data ====================
+
+def cleanup_old_listings():
+    """
+    Remove rental listings older than 45 days.
+    
+    Cleanup rules:
+    - Active listings older than 45 days from first_seen are deleted (stale data)
+    - Rented listings older than 45 days from marked_rented_at are deleted
+    - Expired listings are deleted immediately
+    
+    This ensures we only keep fresh, relevant rental data.
+    """
+    from .database import SessionLocal
+    db = SessionLocal()
+    try:
+        cutoff_date = datetime.utcnow() - timedelta(days=LISTING_RETENTION_DAYS)
+        
+        # Delete active listings older than 45 days (stale - should have been re-scraped)
+        stale_active = db.query(ZillowListing).filter(
+            ZillowListing.status == 'active',
+            ZillowListing.first_seen < cutoff_date
+        ).delete()
+        
+        # Delete rented listings older than 45 days from when they were marked rented
+        stale_rented = db.query(ZillowListing).filter(
+            ZillowListing.status == 'rented',
+            ZillowListing.marked_rented_at < cutoff_date
+        ).delete()
+        
+        # Delete any expired listings
+        expired = db.query(ZillowListing).filter(
+            ZillowListing.status == 'expired'
+        ).delete()
+        
+        db.commit()
+        
+        total_deleted = stale_active + stale_rented + expired
+        if total_deleted > 0:
+            logger.info(f"🧹 Cleaned up {total_deleted} old listings "
+                       f"({stale_active} stale active, {stale_rented} old rented, {expired} expired)")
+    except Exception as e:
+        logger.error(f"Error cleaning up old listings: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
 
 def cleanup_old_airdna_data():
     """Remove AirDNA data older than 1 year (manual entries only - Airbtics refreshes)"""
@@ -2787,11 +3241,18 @@ def reset_database_schema(confirm: bool = Query(False)):
 @app.on_event("startup")
 async def startup_tasks():
     """Run cleanup and Airbtics sync on startup"""
-    # Cleanup old manual data
+    logger.info("🚀 Starting up - running cleanup tasks...")
+    
+    # Cleanup old rental listings (45-day retention)
+    cleanup_old_listings()
+    
+    # Cleanup old manual AirDNA data (1-year retention)
     cleanup_old_airdna_data()
     
     # Start Airbtics sync in background for cities needing refresh
     asyncio.create_task(airbtics.startup_sync())
+    
+    logger.info(f"✅ Startup complete. Listings retained for {LISTING_RETENTION_DAYS} days.")
 
 
 if __name__ == "__main__":

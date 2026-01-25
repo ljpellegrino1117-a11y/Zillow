@@ -108,12 +108,17 @@ class ZillowListing(Base):
     agent_company = Column(String(200), nullable=True)
     
     # Data source tracking
-    listing_source = Column(String(50), default='zillow', index=True)  # 'zillow', 'realtor', 'manual'
+    listing_source = Column(String(50), default='zillow', index=True)  # 'zillow', 'realtor', 'both', 'manual'
     
     # Photo URLs (JSON array)
     photos = Column(Text, nullable=True)  # JSON array of photo URLs
     
-    scraped_at = Column(DateTime, default=datetime.utcnow)
+    # Listing lifecycle tracking for 45-day retention
+    status = Column(String(20), default='active', index=True)  # 'active', 'rented', 'expired'
+    first_seen = Column(DateTime, default=datetime.utcnow, index=True)  # When listing was first discovered
+    last_seen = Column(DateTime, default=datetime.utcnow, index=True)  # Last time listing appeared in API
+    scraped_at = Column(DateTime, default=datetime.utcnow)  # Last scrape timestamp (for backward compat)
+    marked_rented_at = Column(DateTime, nullable=True)  # When listing was marked as rented (missing from API)
 
     city_rel = relationship("City", back_populates="listings")
     
@@ -123,6 +128,9 @@ class ZillowListing(Base):
         Index('idx_listings_city_price', 'city_id', 'price'),
         Index('idx_listings_city_type', 'city_id', 'listing_type'),
         Index('idx_listings_city_bedrooms_price', 'city_id', 'bedrooms', 'price'),
+        Index('idx_listings_status', 'status'),
+        Index('idx_listings_first_seen', 'first_seen'),
+        Index('idx_listings_last_seen', 'last_seen'),
     )
 
 

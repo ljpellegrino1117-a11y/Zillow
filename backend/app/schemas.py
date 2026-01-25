@@ -130,12 +130,29 @@ class ZillowListingResponse(ZillowListingBase):
     agent_phone: Optional[str] = None
     agent_email: Optional[str] = None
     agent_company: Optional[str] = None
-    listing_source: str = 'zillow'  # 'zillow', 'realtor', 'manual'
+    listing_source: str = 'zillow'  # 'zillow', 'realtor', 'both', 'manual'
     photos: Optional[str] = None  # JSON array of photo URLs
+    # Listing lifecycle tracking
+    status: str = 'active'  # 'active', 'rented', 'expired'
+    first_seen: Optional[datetime] = None  # When listing was first discovered
+    last_seen: Optional[datetime] = None  # Last time listing was seen in API
     scraped_at: datetime
+    marked_rented_at: Optional[datetime] = None  # When marked as rented
 
     class Config:
         from_attributes = True
+
+
+class ListingsStatsResponse(BaseModel):
+    """Statistics about listings in the database"""
+    total_listings: int
+    active_listings: int
+    rented_listings: int
+    expired_listings: int
+    listings_by_source: dict  # {'zillow': 100, 'realtor': 50}
+    oldest_listing_date: Optional[datetime] = None
+    newest_listing_date: Optional[datetime] = None
+    retention_days: int = 45  # How long listings are kept
 
 
 # AirDNA Schemas
