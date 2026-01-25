@@ -343,6 +343,49 @@ export const getScrapeStatus = async (city: string, state: string, zipCode?: str
   return response.data;
 };
 
+// Batch scraping API
+export interface BatchScrapeStartResponse {
+  status: string;
+  message: string;
+  cities?: string[];
+  cities_count?: number;
+  min_bedrooms?: number;
+  max_bedrooms?: number;
+  current_city?: string;
+}
+
+export interface BatchScrapeStatus {
+  status: 'idle' | 'starting' | 'running' | 'completed';
+  total_cities: number;
+  completed_cities: number;
+  failed_cities: number;
+  current_city: string | null;
+  results: Array<{
+    city: string;
+    state: string;
+    status: string;
+    listings_found?: number;
+    message?: string;
+  }>;
+  message: string;
+}
+
+export const startBatchScrapeAllCities = async (
+  minBedrooms: number = 3,
+  maxBedrooms: number = 8
+): Promise<BatchScrapeStartResponse> => {
+  const response = await axios.post(
+    `${API_BASE}/scrape/all-with-revenue-data?min_bedrooms=${minBedrooms}&max_bedrooms=${maxBedrooms}`
+  );
+  invalidateCache('listings');
+  return response.data;
+};
+
+export const getBatchScrapeStatus = async (): Promise<BatchScrapeStatus> => {
+  const response = await axios.get(`${API_BASE}/scrape/batch-status`);
+  return response.data;
+};
+
 // Listings API
 export const getListings = async (
   city?: string,
@@ -762,7 +805,9 @@ export interface OpportunityListing {
   has_waterfront: boolean;
   has_garage: boolean;
   has_yard: boolean;
-  estimated_annual_revenue: number;
+  estimated_annual_revenue: number;  // Occupancy-adjusted realistic estimate
+  potential_annual_revenue?: number;  // Raw 100% occupancy potential
+  occupancy_rate?: number;  // Expected occupancy (e.g., 0.58 = 58%)
   revenue_source: string;
   revenue_confidence: string;
   annual_rent: number;

@@ -916,7 +916,9 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                       <div className="font-semibold">{formatCurrency(opp.monthly_rent)}/mo</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm text-gray-500">STR Revenue</div>
+                      <div className="text-sm text-gray-500">
+                        Est. Revenue {opp.occupancy_rate ? `(${Math.round(opp.occupancy_rate * 100)}% occ.)` : ''}
+                      </div>
                       <div className="font-semibold text-blue-600">
                         {formatCurrency(opp.estimated_annual_revenue)}/yr
                       </div>
@@ -948,16 +950,36 @@ export default function OpportunityFinder({ refreshTrigger }: Props) {
                       <h5 className="font-medium text-gray-900 mb-2">Financials</h5>
                       <div className="space-y-1 text-sm">
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Annual Rent:</span>
-                          <span>{formatCurrency(opp.annual_rent)}</span>
+                          <span className="text-gray-600">Annual Rent Cost:</span>
+                          <span className="text-red-600">-{formatCurrency(opp.annual_rent)}</span>
+                        </div>
+                        {opp.potential_annual_revenue && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">STR Potential (100%):</span>
+                            <span className="text-gray-500">{formatCurrency(opp.potential_annual_revenue)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Expected Occupancy:</span>
+                          <span>{opp.occupancy_rate ? `${Math.round(opp.occupancy_rate * 100)}%` : 'N/A'}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Est. Expenses:</span>
-                          <span>{formatCurrency(opp.estimated_expenses)}</span>
+                          <span className="text-gray-600">Expected Revenue:</span>
+                          <span className="text-blue-600">+{formatCurrency(opp.estimated_annual_revenue)}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Break-even Occ:</span>
-                          <span>{(opp.break_even_occupancy * 100).toFixed(0)}%</span>
+                          <span className="text-gray-600">Operating Expenses:</span>
+                          <span className="text-red-600">-{formatCurrency(opp.estimated_expenses)}</span>
+                        </div>
+                        <div className="flex justify-between border-t border-gray-200 pt-1 mt-1">
+                          <span className="font-medium text-gray-900">Net Profit:</span>
+                          <span className={`font-medium ${opp.estimated_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {opp.estimated_profit >= 0 ? '+' : ''}{formatCurrency(opp.estimated_profit)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Break-even Occ:</span>
+                          <span className="text-gray-500">{(opp.break_even_occupancy * 100).toFixed(0)}%</span>
                         </div>
                       </div>
                     </div>

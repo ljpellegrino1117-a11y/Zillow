@@ -737,6 +737,166 @@ def get_scrape_status(city: str, state: str, zip_code: Optional[str] = None):
     )
 
 
+# Track batch scrape job status
+batch_scrape_status = {
+    "status": "idle",
+    "total_cities": 0,
+    "completed_cities": 0,
+    "failed_cities": 0,
+    "current_city": None,
+    "results": [],
+    "message": ""
+}
+
+
+async def run_batch_scrape_job(cities: List[tuple], min_bedrooms: int, max_bedrooms: int, db_session_factory):
+    """Background task to scrape multiple cities sequentially."""
+    global batch_scrape_status
+    
+    batch_scrape_status["status"] = "running"
+    batch_scrape_status["total_cities"] = len(cities)
+    batch_scrape_status["completed_cities"] = 0
+    batch_scrape_status["failed_cities"] = 0
+    batch_scrape_status["results"] = []
+    batch_scrape_status["message"] = f"Scraping {len(cities)} cities..."
+    
+    for city, state in cities:
+        try:
+            batch_scrape_status["current_city"] = f"{city}, {state}"
+            logger.info(f"Batch scrape: Starting {city}, {state}")
+            
+            # Run the scrape job
+            await run_scrape_job(
+                city=city,
+                state=state,
+                min_bedrooms=min_bedrooms,
+                max_bedrooms=max_bedrooms,
+                db_session_factory=db_session_factory
+            )
+            
+            # Get result from scrape_jobs
+            job_key = f"{city}_{state}"
+            job_result = scrape_jobs.get(job_key, {})
+            
+            if job_result.get("status") == "completed":
+                batch_scrape_status["completed_cities"] += 1
+                batch_scrape_status["results"].append({
+                    "city": city,
+                    "state": state,
+                    "status": "completed",
+                    "listings_found": job_result.get("listings_found", 0),
+                    "message": job_result.get("message", "")
+                })
+            else:
+                batch_scrape_status["failed_cities"] += 1
+                batch_scrape_status["results"].append({
+                    "city": city,
+                    "state": state,
+                    "status": "failed",
+                    "message": job_result.get("message", "Unknown error")
+                })
+                
+        except Exception as e:
+            logger.error(f"Batch scrape error for {city}, {state}: {e}")
+            batch_scrape_status["failed_cities"] += 1
+            batch_scrape_status["results"].append({
+                "city": city,
+                "state": state,
+                "status": "failed",
+                "message": str(e)
+            })
+        
+        # Small delay between cities to avoid rate limiting
+        await asyncio.sleep(2)
+    
+    batch_scrape_status["status"] = "completed"
+    batch_scrape_status["current_city"] = None
+    completed = batch_scrape_status["completed_cities"]
+    failed = batch_scrape_status["failed_cities"]
+    total = batch_scrape_status["total_cities"]
+    batch_scrape_status["message"] = f"Completed {completed}/{total} cities ({failed} failed)"
+    logger.info(f"Batch scrape completed: {completed}/{total} cities, {failed} failed")
+
+
+@app.post("/api/scrape/all-with-revenue-data")
+async def scrape_all_cities_with_revenue_data(
+    background_tasks: BackgroundTasks,
+    min_bedrooms: int = 3,
+    max_bedrooms: int = 8,
+    db: Session = Depends(get_db)
+):
+    """
+    Start scraping rental listings for ALL cities that have Airbtics/AirDNA revenue data.
+    
+    This pulls from both Zillow and Realtor.com APIs for each city,
+    cross-references duplicates, and stores in PostgreSQL with 45-day retention.
+    
+    Runs in background - use GET /api/scrape/batch-status to monitor progress.
+    """
+    global batch_scrape_status
+    from .database import SessionLocal
+    
+    # Check if already running
+    if batch_scrape_status["status"] == "running":
+        return {
+            "status": "already_running",
+            "message": f"Batch scrape already in progress: {batch_scrape_status['completed_cities']}/{batch_scrape_status['total_cities']} cities",
+            "current_city": batch_scrape_status["current_city"]
+        }
+    
+    # Get all cities that have revenue data (from Airbtics or manual AirDNA)
+    cities_with_data = db.query(City).join(
+        AirDNAData, City.id == AirDNAData.city_id
+    ).distinct().all()
+    
+    if not cities_with_data:
+        return {
+            "status": "no_cities",
+            "message": "No cities with revenue data found. Run Airbtics sync first or add manual AirDNA data.",
+            "cities_count": 0
+        }
+    
+    # Build list of (city, state) tuples
+    cities_to_scrape = [(c.city, c.state) for c in cities_with_data]
+    
+    logger.info(f"Starting batch scrape for {len(cities_to_scrape)} cities with revenue data")
+    
+    # Start background task
+    background_tasks.add_task(
+        run_batch_scrape_job,
+        cities_to_scrape,
+        min_bedrooms,
+        max_bedrooms,
+        SessionLocal
+    )
+    
+    # Reset status
+    batch_scrape_status = {
+        "status": "starting",
+        "total_cities": len(cities_to_scrape),
+        "completed_cities": 0,
+        "failed_cities": 0,
+        "current_city": None,
+        "results": [],
+        "message": f"Starting scrape for {len(cities_to_scrape)} cities..."
+    }
+    
+    return {
+        "status": "started",
+        "message": f"Started batch scrape for {len(cities_to_scrape)} cities with revenue data",
+        "cities": [f"{c}, {s}" for c, s in cities_to_scrape],
+        "cities_count": len(cities_to_scrape),
+        "min_bedrooms": min_bedrooms,
+        "max_bedrooms": max_bedrooms
+    }
+
+
+@app.get("/api/scrape/batch-status")
+def get_batch_scrape_status():
+    """Get the status of the batch scrape job for all cities."""
+    return batch_scrape_status
+
+
 # ==================== Listings Endpoints ====================
 
 @app.get("/api/listings", response_model=List[ZillowListingResponse])
@@ -2227,9 +2387,11 @@ def calculate_opportunity_metrics(
     
     return {
         "annual_rent": annual_rent,
-        "estimated_annual_revenue": annual_revenue,
-        "adjusted_revenue": adjusted_revenue,
-        "occupancy_rate": occupancy_rate,
+        # Return ADJUSTED revenue as main estimate (accounts for realistic occupancy)
+        "estimated_annual_revenue": round(adjusted_revenue, 2),
+        # Also provide raw potential and occupancy for transparency
+        "potential_annual_revenue": round(annual_revenue, 2),
+        "occupancy_rate": round(occupancy_rate, 2),
         "estimated_expenses": round(total_expenses, 2),
         "estimated_profit": round(net_profit, 2),
         "monthly_cashflow": round(monthly_cashflow, 2),
@@ -2393,6 +2555,8 @@ async def find_opportunities(
                 has_garage=listing.get("has_garage", False),
                 has_yard=listing.get("has_yard", False),
                 estimated_annual_revenue=metrics["estimated_annual_revenue"],
+                potential_annual_revenue=metrics["potential_annual_revenue"],
+                occupancy_rate=metrics["occupancy_rate"],
                 revenue_source=revenue_data.source or "airbtics",
                 revenue_confidence="high" if revenue_data.source == "airbtics" else "medium",
                 annual_rent=metrics["annual_rent"],

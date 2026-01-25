@@ -18,9 +18,12 @@ import {
   getAirbticsCityStatuses, 
   getDatabaseStatus,
   getListingsLifecycleStats,
+  startBatchScrapeAllCities,
+  getBatchScrapeStatus,
   AirbticsCityStatus,
   DatabaseStatus,
-  ListingsLifecycleStats
+  ListingsLifecycleStats,
+  BatchScrapeStatus
 } from '@/lib/api';
 
 interface DataStatusBarProps {
@@ -32,6 +35,8 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
   const [cityStatuses, setCityStatuses] = useState<AirbticsCityStatus[]>([]);
   const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
   const [listingsStats, setListingsStats] = useState<ListingsLifecycleStats | null>(null);
+  const [batchScrapeStatus, setBatchScrapeStatus] = useState<BatchScrapeStatus | null>(null);
+  const [isScraping, setIsScraping] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,23 +45,80 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
     loadData();
   }, [refreshTrigger]);
 
+  // Poll for batch scrape status when scraping
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    
+    if (isScraping) {
+      interval = setInterval(async () => {
+        try {
+          const status = await getBatchScrapeStatus();
+          setBatchScrapeStatus(status);
+          
+          if (status.status === 'completed' || status.status === 'idle') {
+            setIsScraping(false);
+            // Refresh data after scrape completes
+            loadData();
+          }
+        } catch (err) {
+          console.error('Failed to get batch scrape status:', err);
+        }
+      }, 3000); // Poll every 3 seconds
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isScraping]);
+
   const loadData = async () => {
     try {
       setLoading(true);
       setError(null);
-      const [cities, db, listings] = await Promise.all([
+      const [cities, db, listings, scrapeStatus] = await Promise.all([
         getAirbticsCityStatuses(),
         getDatabaseStatus(),
-        getListingsLifecycleStats()
+        getListingsLifecycleStats(),
+        getBatchScrapeStatus()
       ]);
       setCityStatuses(cities);
       setDbStatus(db);
       setListingsStats(listings);
+      setBatchScrapeStatus(scrapeStatus);
+      
+      // Check if scrape is already running
+      if (scrapeStatus.status === 'running' || scrapeStatus.status === 'starting') {
+        setIsScraping(true);
+      }
     } catch (err) {
       setError('Failed to load data status');
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleScrapeAllCities = async () => {
+    try {
+      setIsScraping(true);
+      const response = await startBatchScrapeAllCities(3, 8);
+      
+      if (response.status === 'already_running') {
+        // Already running, just poll for updates
+        return;
+      }
+      
+      if (response.status === 'no_cities') {
+        setError(response.message);
+        setIsScraping(false);
+        return;
+      }
+      
+      // Started successfully, polling will track progress
+    } catch (err) {
+      console.error('Failed to start batch scrape:', err);
+      setError('Failed to start batch scrape');
+      setIsScraping(false);
     }
   };
 
@@ -143,6 +205,34 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
               </span>
             )}
             
+            {/* Scrape All Listings Button */}
+            {marketsWithData > 0 && (
+              <button
+                onClick={handleScrapeAllCities}
+                disabled={isScraping}
+                className={`px-3 py-1 text-white text-sm rounded transition-colors flex items-center gap-1 ${
+                  isScraping 
+                    ? 'bg-orange-500 cursor-not-allowed' 
+                    : 'bg-green-600 hover:bg-green-700'
+                }`}
+                title="Pull rental listings from Zillow & Realtor.com for all cities with revenue data"
+              >
+                {isScraping ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    {batchScrapeStatus?.current_city 
+                      ? `Scraping ${batchScrapeStatus.completed_cities}/${batchScrapeStatus.total_cities}...`
+                      : 'Starting...'}
+                  </>
+                ) : (
+                  <>
+                    <Home className="w-3 h-3" />
+                    Scrape All Listings
+                  </>
+                )}
+              </button>
+            )}
+            
             {marketsNeedingData.length > 0 && onSyncClick && (
               <button
                 onClick={onSyncClick}
@@ -219,6 +309,55 @@ export default function DataStatusBar({ onSyncClick, refreshTrigger }: DataStatu
                       </span>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Batch Scrape Status */}
+              {batchScrapeStatus && (batchScrapeStatus.status === 'running' || batchScrapeStatus.status === 'completed') && (
+                <div className="pt-3 border-t border-gray-200">
+                  <h4 className="text-sm font-medium text-orange-700 mb-2 flex items-center gap-1">
+                    {batchScrapeStatus.status === 'running' ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-green-600" />
+                    )}
+                    Batch Scrape: {batchScrapeStatus.message}
+                  </h4>
+                  {batchScrapeStatus.status === 'running' && batchScrapeStatus.current_city && (
+                    <div className="text-sm text-gray-600 mb-2">
+                      Currently scraping: <strong>{batchScrapeStatus.current_city}</strong>
+                    </div>
+                  )}
+                  <div className="flex gap-4 text-sm">
+                    <span className="text-green-600">
+                      Completed: <strong>{batchScrapeStatus.completed_cities}</strong>
+                    </span>
+                    <span className="text-red-600">
+                      Failed: <strong>{batchScrapeStatus.failed_cities}</strong>
+                    </span>
+                    <span className="text-gray-600">
+                      Total: <strong>{batchScrapeStatus.total_cities}</strong>
+                    </span>
+                  </div>
+                  {batchScrapeStatus.results.length > 0 && (
+                    <div className="mt-2 max-h-32 overflow-y-auto">
+                      <div className="flex flex-wrap gap-1">
+                        {batchScrapeStatus.results.slice(-10).map((r, i) => (
+                          <span 
+                            key={i}
+                            className={`text-xs px-2 py-0.5 rounded ${
+                              r.status === 'completed' 
+                                ? 'bg-green-100 text-green-700' 
+                                : 'bg-red-100 text-red-700'
+                            }`}
+                            title={r.message}
+                          >
+                            {r.city}, {r.state}: {r.listings_found || 0}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

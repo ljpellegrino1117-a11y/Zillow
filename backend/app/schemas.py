@@ -394,7 +394,9 @@ class OpportunityListing(BaseModel):
     has_yard: bool = False
     
     # Revenue estimates (from Airbtics)
-    estimated_annual_revenue: float
+    estimated_annual_revenue: float  # Occupancy-adjusted realistic estimate
+    potential_annual_revenue: Optional[float] = None  # Raw 100% occupancy potential
+    occupancy_rate: Optional[float] = None  # Expected occupancy (e.g., 0.58 = 58%)
     revenue_source: str = 'airbtics'  # 'airbtics', 'airdna', 'estimated'
     revenue_confidence: str = 'medium'  # 'low', 'medium', 'high'
     
